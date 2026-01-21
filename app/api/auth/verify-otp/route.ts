@@ -20,7 +20,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Only college email is allowed." }, { status: 400 });
     }
 
-    const otpRecord = await Otp.findOne({ email });
+    const otpRecord = await Otp.findOne({
+      email,
+      $or: [{ purpose: "register" }, { purpose: { $exists: false } }],
+    });
     if (!otpRecord) {
       return NextResponse.json({ message: "OTP not found or expired." }, { status: 404 });
     }

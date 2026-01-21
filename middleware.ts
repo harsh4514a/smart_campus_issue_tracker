@@ -4,7 +4,14 @@ import { jwtVerify } from "jose";
 
 const jwtSecret = process.env.JWT_SECRET;
 
-const PUBLIC_PATHS = ["/api/auth/login", "/api/auth/register", "/api/auth/send-otp", "/api/auth/verify-otp"];
+const PUBLIC_PATHS = [
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/send-otp",
+  "/api/auth/verify-otp",
+  "/api/auth/request-password-reset",
+  "/api/auth/reset-password",
+];
 
 const ROLE_RULES: { pattern: RegExp; roles: Array<"student" | "staff" | "admin"> }[] = [
   { pattern: /^\/api\/issues$/, roles: ["student"] },

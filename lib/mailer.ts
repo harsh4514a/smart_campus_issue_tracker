@@ -14,10 +14,15 @@ export const transporter = nodemailer.createTransport({
   host: smtpHost,
   port: smtpPort,
   secure: smtpPort === 465,
+  pool: true,
+  maxConnections: 5,
+  maxMessages: Infinity,
   auth: {
     user: smtpUser,
     pass: smtpPass,
   },
+  connectionTimeout: 20_000,
+  socketTimeout: 20_000,
 });
 
 export async function sendOtpEmail(to: string, otp: string) {
@@ -25,6 +30,7 @@ export async function sendOtpEmail(to: string, otp: string) {
     from: smtpFrom,
     to,
     subject: "Your Smart Campus verification code",
+    priority: "high",
     text: `Your verification code is ${otp}. It will expire in 5 minutes.`,
     html: `<p>Your verification code is <strong>${otp}</strong>.</p><p>It will expire in 5 minutes.</p>`,
   });

@@ -12,6 +12,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Name, email, and password are required." }, { status: 400 });
     }
 
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      return NextResponse.json(
+        { message: "Password must be at least 8 characters and include uppercase, lowercase, number, and special character." },
+        { status: 400 }
+      );
+    }
+
     const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
     if (!collegeEmailRegex.test(email)) {
       return NextResponse.json({ message: "Only college email is allowed." }, { status: 400 });
