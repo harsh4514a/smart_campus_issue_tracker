@@ -11,16 +11,16 @@ export async function GET(request: Request) {
   if (auth instanceof Response) return auth;
 
   try {
-    const [studentCount, staffCount, issueCount, pendingCount] = await Promise.all([
+    const [studentCount, facultyCount, issueCount, pendingCount] = await Promise.all([
       User.countDocuments({ role: "student" }),
-      User.countDocuments({ role: "staff" }),
+      User.countDocuments({ role: "faculty" }),
       Issue.countDocuments({}),
       Issue.countDocuments({ status: "Pending" }),
     ]);
 
     return NextResponse.json({
       students: studentCount,
-      staff: staffCount,
+      faculty: facultyCount,
       issues: issueCount,
       pending: pendingCount,
     });

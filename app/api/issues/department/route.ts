@@ -7,14 +7,14 @@ import { authenticateRequest } from "@/lib/auth";
 export async function GET(request: Request) {
   await connectDB();
 
-  const authResult = await authenticateRequest(request, ["staff"]);
+  const authResult = await authenticateRequest(request, ["faculty", "staff"]);
   if (authResult instanceof Response) return authResult;
 
   const { user } = authResult;
 
   if (!user.department) {
     return NextResponse.json(
-      { message: "Staff user is not associated with a department." },
+      { message: "This account is not associated with a department." },
       { status: 400 }
     );
   }

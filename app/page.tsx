@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import HomeNavbar from "@/components/HomeNavbar";
 import { getRedirectPath, loadAuth } from "@/lib/client-auth";
 import Link from "next/link";
 
@@ -16,33 +17,8 @@ export default function Home() {
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-950 via-emerald-900 to-emerald-800 text-white">
-      {/* Header / Navbar */}
-      <header className="border-b border-emerald-700/50 bg-emerald-950/40 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-2xl font-bold">
-              C
-            </div>
-            <span className="text-xl font-semibold">CampusTrack</span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <Link
-              href="/login"
-              className="px-5 py-2 text-sm font-medium text-emerald-100 hover:text-white transition"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/register"
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition shadow-sm"
-            >
-              Get Started
-            </Link>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-linear-to-b from-emerald-950 via-emerald-900 to-emerald-800 text-white">
+      <HomeNavbar />
 
       {/* Hero Section */}
       <section className="pt-20 pb-32 text-center px-6">

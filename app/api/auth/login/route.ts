@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import User from "@/models/User";
-import "@/models/Department"; // ensure Department model is registered for populate
+import "@/models/Department"; 
 import { signToken } from "@/lib/auth";
 
 export async function POST(request: Request) {

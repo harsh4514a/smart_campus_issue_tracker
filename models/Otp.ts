@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
+import type { UserRole } from "./User";
 
 export type OtpPurpose = "register" | "reset";
 
@@ -8,6 +9,7 @@ export interface IOtp extends Document {
   passwordHash: string;
   otp: string;
   purpose: OtpPurpose;
+  role: UserRole;
   expiresAt: Date;
   createdAt: Date;
 }
@@ -18,8 +20,9 @@ const OtpSchema = new Schema<IOtp>(
     name: { type: String, required: true },
     passwordHash: { type: String, required: true },
     otp: { type: String, required: true },
-  purpose: { type: String, enum: ["register", "reset"], default: "register", index: true },
-  expiresAt: { type: Date, required: true },
+    purpose: { type: String, enum: ["register", "reset"], default: "register", index: true },
+    role: { type: String, enum: ["student", "faculty", "staff", "admin"], default: "student" },
+    expiresAt: { type: Date, required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

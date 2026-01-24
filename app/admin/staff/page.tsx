@@ -5,11 +5,11 @@ import Protected from "@/components/Protected";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 
 type Department = { _id: string; name: string };
-type Staff = { _id: string; name: string; email: string; department?: Department };
+type Faculty = { _id: string; name: string; email: string; department?: Department };
 
 export default function AdminStaffPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
+  const [faculty, setFaculty] = useState<Faculty[]>([]);
   const [form, setForm] = useState({ name: "", email: "", password: "", departmentId: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +25,7 @@ export default function AdminStaffPage() {
     ])
       .then(([deptRes, staffRes]) => {
         setDepartments(deptRes.departments || []);
-        setStaff(staffRes.staff || []);
+        setFaculty(staffRes.faculty || []);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load data"))
       .finally(() => setLoading(false));
@@ -50,7 +50,7 @@ export default function AdminStaffPage() {
       setForm({ name: "", email: "", password: "", departmentId: "" });
       loadData();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to create staff";
+      const message = err instanceof Error ? err.message : "Failed to create faculty";
       setError(message);
     } finally {
       setSaving(false);
@@ -60,7 +60,7 @@ export default function AdminStaffPage() {
   return (
     <Protected allowedRoles={["admin"]}>
       <div className="min-h-screen bg-gray-50 p-6 space-y-4">
-        <h1 className="text-2xl font-semibold">Staff</h1>
+  <h1 className="text-2xl font-semibold">Faculty</h1>
         <form className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-3xl bg-white shadow rounded p-4" onSubmit={onSubmit}>
           <Input label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
           <Input label="College Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} required />
@@ -85,7 +85,7 @@ export default function AdminStaffPage() {
               className="rounded bg-blue-600 text-white px-4 py-2 font-semibold hover:bg-blue-700 disabled:opacity-60"
               disabled={saving}
             >
-              {saving ? "Saving..." : "Add Staff"}
+              {saving ? "Saving..." : "Add Faculty"}
             </button>
           </div>
           {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
@@ -102,7 +102,7 @@ export default function AdminStaffPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {staff.map((s) => (
+                {faculty.map((s) => (
                   <tr key={s._id} className="hover:bg-gray-50">
                     <Td>{s.name}</Td>
                     <Td>{s.email}</Td>

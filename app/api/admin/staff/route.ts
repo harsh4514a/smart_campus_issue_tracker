@@ -11,8 +11,8 @@ export async function GET(request: Request) {
   const auth = await authenticateRequest(request, ["admin"]);
   if (auth instanceof Response) return auth;
 
-  const staff = await User.find({ role: "staff" }).populate("department").sort({ name: 1 });
-  return NextResponse.json({ staff });
+  const faculty = await User.find({ role: "faculty" }).populate("department").sort({ name: 1 });
+  return NextResponse.json({ faculty });
 }
 
 export async function POST(request: Request) {
@@ -37,12 +37,12 @@ export async function POST(request: Request) {
     const existing = await User.findOne({ email });
     if (existing) return NextResponse.json({ message: "Email already registered." }, { status: 409 });
 
-    const user = new User({ name, email, password, role: "staff", department: dept._id });
+  const user = new User({ name, email, password, role: "faculty", department: dept._id });
     await user.save();
 
-    return NextResponse.json({ message: "Staff created", user }, { status: 201 });
+    return NextResponse.json({ message: "Faculty member created", user }, { status: 201 });
   } catch (error) {
-    console.error("Create staff error", error);
+    console.error("Create faculty error", error);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

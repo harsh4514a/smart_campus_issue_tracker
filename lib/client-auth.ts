@@ -1,6 +1,6 @@
 "use client";
 
-export type UserRole = "student" | "staff" | "admin";
+export type UserRole = "student" | "faculty" | "staff" | "admin";
 
 export interface StoredAuth {
   token: string;
@@ -37,9 +37,9 @@ export function clearAuth() {
 }
 
 export function getRedirectPath(role: UserRole) {
-  if (role === "student") return "/student/dashboard";
+  if (role === "admin") return "/admin/dashboard";
   if (role === "staff") return "/staff/dashboard";
-  return "/admin/dashboard";
+  return "/student/dashboard";
 }
 
 export async function authFetch(url: string, options: RequestInit = {}, token?: string) {

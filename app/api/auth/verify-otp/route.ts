@@ -3,6 +3,7 @@ import connectDB from "@/lib/db";
 import User from "@/models/User";
 import Otp from "@/models/Otp";
 import { signToken } from "@/lib/auth";
+import { deriveRoleFromEmail } from "@/lib/role-utils";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 
@@ -44,11 +45,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Email is already registered." }, { status: 409 });
     }
 
+    const derivedRole = otpRecord.role || deriveRoleFromEmail(otpRecord.email);
+
     const user = new User({
       name: otpRecord.name,
       email: otpRecord.email,
       password: otpRecord.passwordHash,
-      role: "student",
+      role: derivedRole,
       department: null,
     });
 

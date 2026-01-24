@@ -5,7 +5,7 @@ import Protected from "@/components/Protected";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 import Link from "next/link";
 
-type Stats = { students: number; staff: number; issues: number; pending: number };
+type Stats = { students: number; faculty: number; issues: number; pending: number };
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -28,7 +28,7 @@ export default function AdminDashboard() {
           <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
           <div className="space-x-2 text-sm text-gray-600">
             <Link className="px-3 py-2 rounded bg-blue-600 text-white" href="/admin/departments">Departments</Link>
-            <Link className="px-3 py-2 rounded bg-blue-600 text-white" href="/admin/staff">Staff</Link>
+            <Link className="px-3 py-2 rounded bg-blue-600 text-white" href="/admin/staff">Faculty</Link>
             <Link className="px-3 py-2 rounded bg-blue-600 text-white" href="/admin/issues">Issues</Link>
           </div>
         </div>
@@ -37,7 +37,7 @@ export default function AdminDashboard() {
         {stats && (
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <Card label="Students" value={stats.students} />
-            <Card label="Staff" value={stats.staff} />
+            <Card label="Faculty" value={stats.faculty} />
             <Card label="Issues" value={stats.issues} />
             <Card label="Pending" value={stats.pending} />
           </div>

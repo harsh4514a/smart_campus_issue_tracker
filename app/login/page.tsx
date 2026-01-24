@@ -152,7 +152,9 @@ import { FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { authFetch, getRedirectPath, saveAuth } from "@/lib/client-auth";
 import Link from "next/link";
+import HomeNavbar from "@/components/HomeNavbar";
 import { useToast } from "@/components/ToastProvider";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -163,6 +165,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Make sure form starts completely empty and clears on each visit to /login
   useLayoutEffect(() => {
@@ -212,27 +215,10 @@ export default function LoginPage() {
   };
 
   return (
-  <div className="min-h-screen bg-linear-to-b from-emerald-950 via-emerald-900 to-emerald-800 flex flex-col">
-      {/* Header - same as Register page */}
-      <header className="border-b border-emerald-700/60 bg-emerald-950/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-xl">
-              C
-            </div>
-            <span className="text-xl font-semibold text-white group-hover:text-emerald-100 transition-colors">CampusTrack</span>
-          </Link>
+    <div className="min-h-screen bg-linear-to-b from-emerald-950 via-emerald-900 to-emerald-800 flex flex-col">
+      <HomeNavbar actions={[{ label: "Create account", href: "/register", variant: "primary" }]} />
 
-          <Link
-            href="/register"
-            className="px-6 py-2.5 bg-emerald-700/40 hover:bg-emerald-600/50 text-white rounded-lg font-medium transition backdrop-blur-sm border border-emerald-500/30"
-          >
-            Create Account
-          </Link>
-        </div>
-      </header>
-
-      {/* Main Content */}
+      {/* Login Form */}
       <main className="flex-1 flex items-center justify-center py-12 px-5">
         <div className="w-full max-w-lg">
           <div className="bg-emerald-900/30 backdrop-blur-xl rounded-2xl border border-emerald-700/40 shadow-2xl overflow-hidden">
@@ -250,7 +236,7 @@ export default function LoginPage() {
                 <input
                   type="text"
                   className="pointer-events-none absolute inset-0 h-0 w-0 opacity-0"
-                  autoComplete="username"
+                  autoComplete="email"
                   tabIndex={-1}
                 />
                 <input
@@ -264,13 +250,14 @@ export default function LoginPage() {
                     College Email
                   </label>
                   <input
+                    name="email"
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                    placeholder="yourname@charusat.edu.in"
+                    placeholder="yourid@charusat.edu.in"
                     required
-                    autoComplete="off"
+                    autoComplete="email"
                   />
                 </div>
 
@@ -278,15 +265,26 @@ export default function LoginPage() {
                   <label className="block text-sm font-medium text-emerald-200 mb-2">
                     Password
                   </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                    placeholder="••••••••••••"
-                    required
-                    autoComplete="off"
-                  />
+                  <div className="relative">
+                    <input
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-5 py-3.5 pr-12 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
+                      placeholder="Enter your Password"
+                      required
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute inset-y-0 right-4 flex items-center text-emerald-200 hover:text-white transition"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
                 </div>
 
                 <button

@@ -4,6 +4,7 @@ import connectDB from "@/lib/db";
 import User from "@/models/User";
 import Otp from "@/models/Otp";
 import { sendOtpEmail } from "@/lib/mailer";
+import { deriveRoleFromEmail } from "@/lib/role-utils";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$/;
@@ -46,9 +47,11 @@ export async function POST(request: Request) {
     const passwordHash = await hashPromise;
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
+    const role = deriveRoleFromEmail(email);
+
     const upsertOtpPromise = Otp.findOneAndUpdate(
       { email, $or: [{ purpose: "register" }, { purpose: { $exists: false } }] },
-      { email, name, passwordHash, otp, expiresAt, purpose: "register" },
+      { email, name, passwordHash, otp, expiresAt, purpose: "register", role },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).exec();
 

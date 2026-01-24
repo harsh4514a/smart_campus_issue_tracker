@@ -46,7 +46,7 @@ export async function POST(request: Request) {
 
     const upsertOtpPromise = Otp.findOneAndUpdate(
       { email: normalizedEmail, purpose: "reset" },
-      { email: normalizedEmail, name: user.name, passwordHash, otp, expiresAt, purpose: "reset" },
+      { email: normalizedEmail, name: user.name, passwordHash, otp, expiresAt, purpose: "reset", role: user.role },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).exec();
 

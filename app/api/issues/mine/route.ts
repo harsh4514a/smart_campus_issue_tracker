@@ -7,7 +7,7 @@ import { authenticateRequest } from "@/lib/auth";
 export async function GET(request: Request) {
   await connectDB();
 
-  const authResult = await authenticateRequest(request, ["student"]);
+  const authResult = await authenticateRequest(request, ["student", "faculty"]);
   if (authResult instanceof Response) return authResult;
 
   const { user } = authResult;

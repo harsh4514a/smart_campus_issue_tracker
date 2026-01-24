@@ -3,8 +3,10 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import HomeNavbar from "@/components/HomeNavbar";
 import { authFetch, getRedirectPath, saveAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
+import { Eye, EyeOff } from "lucide-react";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$/;
@@ -23,17 +25,22 @@ export default function ForgotPasswordPage() {
   const { showToast } = useToast();
 
   const [form, setForm] = useState<ResetFormState>({ ...emptyForm });
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
+
   useEffect(() => {
     formRef.current?.reset();
     setForm({ ...emptyForm });
     setOtpSent(false);
     setResendTimer(0);
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
   }, []);
 
   useEffect(() => {
@@ -131,23 +138,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <div className="min-h-screen bg-linear-to-b from-emerald-950 via-emerald-900 to-emerald-800 flex flex-col">
-      <header className="border-b border-emerald-700/60 bg-emerald-950/50 backdrop-blur-md sticky top-0 z-50">
-  <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-xl">
-              C
-            </div>
-            <span className="text-xl font-semibold text-white group-hover:text-emerald-100 transition-colors">CampusTrack</span>
-          </Link>
-
-          <Link
-            href="/login"
-            className="px-6 py-2.5 bg-emerald-700/40 hover:bg-emerald-600/50 text-white rounded-lg font-medium transition backdrop-blur-sm border border-emerald-500/30"
-          >
-            Back to login
-          </Link>
-        </div>
-      </header>
+      <HomeNavbar actions={[{ label: "Back to login", href: "/login", variant: "primary" }]} />
 
       <main className="flex-1 flex items-center justify-center py-12 px-5">
         <div className="w-full max-w-lg">
@@ -169,7 +160,7 @@ export default function ForgotPasswordPage() {
                         value={form.email}
                         onChange={handleChange}
                         className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="yourname@charusat.edu.in"
+                        placeholder="yourid@charusat.edu.in"
                         autoComplete="email"
                         required
                       />
@@ -177,29 +168,50 @@ export default function ForgotPasswordPage() {
 
                     <div>
                       <label className="block text-sm font-medium text-emerald-200 mb-2">New Password</label>
-                      <input
-                        name="newPassword"
-                        type="password"
-                        value={form.newPassword}
-                        onChange={handleChange}
-                        className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="Create a strong password"
-                        autoComplete="new-password"
-                        required
-                      />
+                      <div className="relative">
+                        <input
+                          name="newPassword"
+                          type={showNewPassword ? "text" : "password"}
+                          value={form.newPassword}
+                          onChange={handleChange}
+                          className="w-full px-5 py-3.5 pr-12 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
+                          placeholder="Create a strong password"
+                          autoComplete="new-password"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword((prev) => !prev)}
+                          className="absolute inset-y-0 right-4 flex items-center text-emerald-200 hover:text-white transition"
+                          aria-label={showNewPassword ? "Hide password" : "Show password"}
+                        >
+                          {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
+                      </div>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-emerald-200 mb-2">Confirm Password</label>
-                      <input
-                        name="confirmPassword"
-                        type="password"
-                        value={form.confirmPassword}
-                        onChange={handleChange}
-                        className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="Re-enter your password"
-                        required
-                      />
+                      <div className="relative">
+                        <input
+                          name="confirmPassword"
+                          type={showConfirmPassword ? "text" : "password"}
+                          value={form.confirmPassword}
+                          onChange={handleChange}
+                          className="w-full px-5 py-3.5 pr-12 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
+                          placeholder="Re-enter your password"
+                          autoComplete="new-password"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword((prev) => !prev)}
+                          className="absolute inset-y-0 right-4 flex items-center text-emerald-200 hover:text-white transition"
+                          aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                        >
+                          {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
+                      </div>
                     </div>
                   </>
                 ) : (
@@ -245,9 +257,8 @@ export default function ForgotPasswordPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className={`w-full py-4 px-6 rounded-xl font-medium text-white transition-all shadow-lg mt-2 ${
-                    loading ? "bg-emerald-800 cursor-not-allowed" : "bg-emerald-600 hover:bg-emerald-500"
-                  }`}
+                  className={`w-full py-4 px-6 rounded-xl font-medium text-white transition-all shadow-lg mt-2 ${loading ? "bg-emerald-800 cursor-not-allowed" : "bg-emerald-600 hover:bg-emerald-500"
+                    }`}
                 >
                   {loading ? (otpSent ? "Verifying..." : "Sending code...") : otpSent ? "Reset password" : "Send reset code"}
                 </button>

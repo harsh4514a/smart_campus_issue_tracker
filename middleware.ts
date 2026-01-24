@@ -13,12 +13,12 @@ const PUBLIC_PATHS = [
   "/api/auth/reset-password",
 ];
 
-const ROLE_RULES: { pattern: RegExp; roles: Array<"student" | "staff" | "admin"> }[] = [
-  { pattern: /^\/api\/issues$/, roles: ["student"] },
-  { pattern: /^\/api\/issues\/mine/, roles: ["student"] },
-  { pattern: /^\/api\/issues\/department/, roles: ["staff"] },
+const ROLE_RULES: { pattern: RegExp; roles: Array<"student" | "faculty" | "staff" | "admin"> }[] = [
+  { pattern: /^\/api\/issues$/, roles: ["student", "faculty"] },
+  { pattern: /^\/api\/issues\/mine/, roles: ["student", "faculty"] },
+  { pattern: /^\/api\/issues\/department/, roles: ["faculty", "staff"] },
   { pattern: /^\/api\/issues\/[^/]+\/assign/, roles: ["admin"] },
-  { pattern: /^\/api\/issues\/[^/]+\/status/, roles: ["staff", "admin"] },
+  { pattern: /^\/api\/issues\/[^/]+\/status/, roles: ["faculty", "staff", "admin"] },
   { pattern: /^\/api\/admin\//, roles: ["admin"] },
 ];
 
@@ -48,8 +48,8 @@ export async function middleware(req: NextRequest) {
   const token = authHeader.split(" ")[1];
 
   try {
-    const { payload } = await jwtVerify(token, secretKey);
-    const role = payload.role as "student" | "staff" | "admin" | undefined;
+  const { payload } = await jwtVerify(token, secretKey);
+  const role = payload.role as "student" | "faculty" | "staff" | "admin" | undefined;
 
     if (!role || !rule.roles.includes(role)) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });

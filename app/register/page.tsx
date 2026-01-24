@@ -298,11 +298,13 @@
 
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authFetch, getRedirectPath, saveAuth } from "@/lib/client-auth";
 import Link from "next/link";
+import HomeNavbar from "@/components/HomeNavbar";
 import { useToast } from "@/components/ToastProvider";
+import { Eye, EyeOff } from "lucide-react";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$/;
@@ -323,16 +325,84 @@ export default function RegisterPage() {
 
   const [form, setForm] = useState<RegisterFormState>({ ...emptyForm });
   const formRef = useRef<HTMLFormElement>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+
+  const passwordStrength = useMemo(() => {
+    const pwd = form.password;
+    if (!pwd) {
+      return {
+        score: 0,
+        label: "Use 8+ chars with upper, lower, number & symbol",
+        color: "text-emerald-200/80",
+        barColor: "bg-emerald-200/40",
+      };
+    }
+
+    let score = 0;
+    if (pwd.length >= 8) score += 1;
+    if (pwd.length >= 12) score += 1;
+    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score += 1;
+    if (/\d/.test(pwd)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pwd)) score += 1;
+
+    if (score > 5) score = 5;
+
+    if (score <= 2) {
+      return {
+        score: (score / 5) * 100,
+        label: "Strength: Weak — add length & variety",
+        color: "text-rose-300",
+        barColor: "bg-rose-400",
+      };
+    }
+
+    if (score === 3 || score === 4) {
+      return {
+        score: (score / 5) * 100,
+        label: "Strength: Good — almost there",
+        color: "text-amber-300",
+        barColor: "bg-amber-400",
+      };
+    }
+
+    return {
+      score: 100,
+      label: "Strength: Strong ✔",
+      color: "text-emerald-300",
+      barColor: "bg-emerald-400",
+    };
+  }, [form.password]);
+
+  const matchIndicator = useMemo(() => {
+    if (!form.confirmPassword) {
+      return null;
+    }
+
+    if (form.confirmPassword === form.password) {
+      return {
+        message: "Passwords match",
+        color: "text-emerald-300",
+      };
+    }
+
+    return {
+      message: "Passwords do not match yet",
+      color: "text-rose-300",
+    };
+  }, [form.confirmPassword, form.password]);
 
   useEffect(() => {
     formRef.current?.reset();
     setForm({ ...emptyForm });
     setOtpSent(false);
     setResendTimer(0);
+    setShowPassword(false);
+    setShowConfirmPassword(false);
   }, []);
 
   useEffect(() => {
@@ -427,6 +497,8 @@ export default function RegisterPage() {
       setForm({ ...emptyForm });
       setOtpSent(false);
       setResendTimer(0);
+      setShowPassword(false);
+      setShowConfirmPassword(false);
     } catch (err) {
       showToast({
         message: err instanceof Error ? err.message : "Verification failed",
@@ -439,24 +511,8 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen bg-linear-to-b from-emerald-950 via-emerald-900 to-emerald-800 flex flex-col">
-      {/* Header - same style as landing page */}
-      <header className="border-b border-emerald-700/60 bg-emerald-950/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-xl">
-              C
-            </div>
-            <span className="text-xl font-semibold text-white group-hover:text-emerald-100 transition-colors">CampusTrack</span>
-          </Link>
-
-          <Link
-            href="/login"
-            className="px-6 py-2.5 bg-emerald-700/40 hover:bg-emerald-600/50 text-white rounded-lg font-medium transition backdrop-blur-sm border border-emerald-500/30"
-          >
-            Sign in
-          </Link>
-        </div>
-      </header>
+      <HomeNavbar actions={[{ label: "Sign in", href: "/login", variant: "ghost" }]} />
+      
 
       {/* Register Form - centered */}
       <main className="flex-1 flex items-center justify-center py-12 px-5">
@@ -501,7 +557,7 @@ export default function RegisterPage() {
                         value={form.email}
                         onChange={handleChange}
                         className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="yourname@charusat.edu.in"
+                        placeholder="yourid@charusat.edu.in"
                         required
                       />
                     </div>
@@ -510,32 +566,66 @@ export default function RegisterPage() {
                       <label className="block text-sm font-medium text-emerald-200 mb-2">
                         Password
                       </label>
-                      <input
-                        name="password"
-                        type="password"
-                        autoComplete="new-password"
-                        value={form.password}
-                        onChange={handleChange}
-                        className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="••••••••••••"
-                        required
-                      />
+                      <div className="relative">
+                        <input
+                          name="password"
+                          type={showPassword ? "text" : "password"}
+                          autoComplete="new-password"
+                          value={form.password}
+                          onChange={handleChange}
+                          className="w-full px-5 py-3.5 pr-12 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
+                          placeholder="Enter Strong Password"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((prev) => !prev)}
+                          className="absolute inset-y-0 right-4 flex items-center text-emerald-200 hover:text-white transition"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                        >
+                          {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
+                      </div>
+                      <div className="mt-3 space-y-1">
+                        <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+                          <span
+                            className={`block h-full ${passwordStrength.barColor}`}
+                            style={{ width: `${passwordStrength.score}%` }}
+                          />
+                        </div>
+                        <p className={`text-sm ${passwordStrength.color}`}>{passwordStrength.label}</p>
+                      </div>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-emerald-200 mb-2">
                         Confirm Password
                       </label>
-                      <input
-                        name="confirmPassword"
-                        type="password"
-                        autoComplete="new-password"
-                        value={form.confirmPassword}
-                        onChange={handleChange}
-                        className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="Re-enter your password"
-                        required
-                      />
+                      <div className="relative">
+                        <input
+                          name="confirmPassword"
+                          type={showConfirmPassword ? "text" : "password"}
+                          autoComplete="new-password"
+                          value={form.confirmPassword}
+                          onChange={handleChange}
+                          className="w-full px-5 py-3.5 pr-12 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
+                          placeholder="Re-enter your password"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword((prev) => !prev)}
+                          className="absolute inset-y-0 right-4 flex items-center text-emerald-200 hover:text-white transition"
+                          aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                        >
+                          {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
+                      </div>
+                      {matchIndicator && (
+                        <p className={`mt-2 text-sm ${matchIndicator.color}`}>
+                          {matchIndicator.message}
+                        </p>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -593,8 +683,8 @@ export default function RegisterPage() {
                       ? "Verifying..."
                       : "Sending OTP..."
                     : otpSent
-                    ? "Create Account"
-                    : "Send Verification Code"}
+                      ? "Create Account"
+                      : "Send Verification Code"}
                 </button>
               </form>
 
@@ -613,7 +703,7 @@ export default function RegisterPage() {
       <footer className="border-t border-emerald-800/40 bg-emerald-950/60 backdrop-blur-md py-6 text-center text-emerald-300/80 text-sm">
         <div className="max-w-7xl mx-auto px-6">
           <p>© {new Date().getFullYear()} CampusTrack. Smart Campus Issue Tracker.</p>
-          
+
         </div>
       </footer>
     </div>

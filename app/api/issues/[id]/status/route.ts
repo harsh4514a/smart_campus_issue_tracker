@@ -9,7 +9,7 @@ interface Params {
 
 export async function PATCH(request: Request, { params }: Params) {
   await connectDB();
-  const auth = await authenticateRequest(request, ["staff", "admin"]);
+  const auth = await authenticateRequest(request, ["faculty", "staff", "admin"]);
   if (auth instanceof Response) return auth;
 
   const { id } = params;
