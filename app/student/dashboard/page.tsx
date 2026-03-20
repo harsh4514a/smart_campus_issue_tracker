@@ -34,20 +34,26 @@ interface SummaryCardProps {
   loading: boolean;
 }
 
+const POLL_INTERVAL_MS = 10000;
+
 /* ================= PAGE ================= */
 
 export default function StudentDashboard() {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useMemo(() => loadAuth(), []);
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [loading, setLoading] = useState(Boolean(auth));
+  const cacheKey = "scit_dashboard_issues";
+  const cacheTtlMs = 2 * 60 * 1000;
+  const cachedIssues = readCachedIssues(cacheKey, cacheTtlMs);
+  const [issues, setIssues] = useState<Issue[]>(() => cachedIssues || []);
+  const [loading, setLoading] = useState(() => Boolean(auth) && !cachedIssues);
   const [error, setError] = useState<string | null>(null);
 
   const userName = auth?.user.name || auth?.user.email || "Student";
   const userEmail = auth?.user.email || "student@example.com";
   const userInitials = getInitials(userName);
   const firstName = userName.split(" ")[0];
+  const userRoleLabel = formatRoleLabel(auth?.user.role);
 
   const handleSignOut = () => {
     clearAuth();
@@ -58,10 +64,33 @@ export default function StudentDashboard() {
     if (!auth) return;
 
     authFetch("/api/issues/mine", { method: "GET" }, auth.token)
-      .then((res) => setIssues(res.issues || []))
+      .then((res) => {
+        const latest = res.issues || [];
+        setIssues(latest);
+        writeCachedIssues(cacheKey, latest);
+      })
       .catch(() => setError("Failed to load issues"))
       .finally(() => setLoading(false));
-  }, [auth]);
+  }, [auth, cacheKey, cacheTtlMs]);
+
+  useEffect(() => {
+    if (!auth) return;
+
+    const intervalId = window.setInterval(() => {
+      authFetch("/api/issues/mine", { method: "GET" }, auth.token)
+        .then((res) => {
+          const latest = res.issues || [];
+          setIssues(latest);
+          writeCachedIssues(cacheKey, latest);
+          setError(null);
+        })
+        .catch(() => {
+          // keep existing data on transient polling failures
+        });
+    }, POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [auth, cacheKey]);
 
   const stats = useMemo(() => {
     const total = issues.length;
@@ -112,6 +141,7 @@ export default function StudentDashboard() {
           pathname={pathname}
           userName={userName}
           initials={userInitials}
+          roleLabel={userRoleLabel}
         />
 
         <div className="flex-1 flex flex-col">
@@ -147,7 +177,7 @@ export default function StudentDashboard() {
                   </p>
                 </div>
                 <Link
-                  href="/student/issues"
+                  href="/student/my-issues"
                   className="text-sm font-medium text-slate-600 hover:text-slate-900"
                 >
                   View All →
@@ -275,4 +305,32 @@ function getInitials(value: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+}
+
+function formatRoleLabel(role?: string) {
+  if (!role) return "Student";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function readCachedIssues(key: string, ttlMs: number) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { timestamp: number; issues: Issue[] };
+    if (!parsed.timestamp || !Array.isArray(parsed.issues)) return null;
+    if (Date.now() - parsed.timestamp > ttlMs) return null;
+    return parsed.issues;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedIssues(key: string, issues: Issue[]) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), issues }));
+  } catch {
+    // ignore storage failures
+  }
 }

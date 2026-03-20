@@ -4,19 +4,18 @@ import { authenticateRequest } from "@/lib/auth";
 import Issue from "@/models/Issue";
 
 interface Params {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export async function PATCH(request: Request, { params }: Params) {
   await connectDB();
   const auth = await authenticateRequest(request, ["faculty", "staff", "admin"]);
   if (auth instanceof Response) return auth;
-
-  const { id } = params;
+  const { id } = await params;
 
   try {
     const { status } = await request.json();
-    if (!status || !["Pending", "In Progress", "Resolved"].includes(status)) {
+    if (!status || !["Pending", "In Progress", "Resolved", "Rejected"].includes(status)) {
       return NextResponse.json({ message: "Invalid status." }, { status: 400 });
     }
 

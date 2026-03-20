@@ -2,18 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import {
-  ClipboardList,
-  LayoutDashboard,
-  ListChecks,
-  PlusCircle,
-} from "lucide-react";
+import { ClipboardList, LayoutDashboard, ListChecks, PlusCircle } from "lucide-react";
 
 export const studentNavItems = [
   { label: "Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
   { label: "Report Issue", href: "/student/report", icon: PlusCircle },
-  { label: "My Issues", href: "/student/issues", icon: ClipboardList },
+  { label: "All Issues", href: "/student/issues", icon: ListChecks },
+  { label: "My Issues", href: "/student/my-issues", icon: ClipboardList },
 ] as const;
 
 type StudentSidebarProps = {
@@ -31,8 +29,16 @@ export function StudentSidebar({
   roleLabel = "Student",
   footerSlot,
 }: StudentSidebarProps) {
+  const router = useRouter();
+
+  useEffect(() => {
+    studentNavItems.forEach((item) => {
+      router.prefetch(item.href);
+    });
+  }, [router]);
+
   return (
-    <aside className="hidden w-64 bg-emerald-900 text-white lg:flex flex-col">
+  <aside className="hidden w-64 bg-emerald-900 text-white lg:flex flex-col sticky top-0 h-screen overflow-hidden">
       <div className="px-6 py-6 border-b border-emerald-800">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl">
@@ -70,10 +76,10 @@ export function StudentSidebar({
           </Link>
         ))}
 
-        <div className="mt-4 flex items-center gap-3 px-4 py-3 text-white/50">
+        {/* <div className="mt-4 flex items-center gap-3 px-4 py-3 text-white/50">
           <ListChecks size={18} />
           Notifications (soon)
-        </div>
+        </div> */}
       </nav>
 
       <div className="px-6 py-6 border-t border-emerald-800">

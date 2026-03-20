@@ -7,6 +7,7 @@ const jwtSecret = process.env.JWT_SECRET;
 const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/auth/register",
+  "/api/auth/admin-login",
   "/api/auth/send-otp",
   "/api/auth/verify-otp",
   "/api/auth/request-password-reset",

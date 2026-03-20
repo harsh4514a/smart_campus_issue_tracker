@@ -5,7 +5,6 @@ import mongoose from "mongoose";
  * across route handlers in production to avoid creating new connections.
  */
 const MONGODB_URI = process.env.MONGODB_URI;
-console.log("MONGODB_URI:", process.env.MONGODB_URI);
 if (!MONGODB_URI) {
   throw new Error("Please set the MONGODB_URI environment variable.");
 }

@@ -10,6 +10,8 @@ interface StudentNavbarProps {
   userEmail: string;
   userInitials: string;
   onSignOut: () => void;
+  title?: string;
+  subtitle?: string;
   reportHref?: string;
   className?: string;
 }
@@ -20,19 +22,21 @@ export function StudentNavbar({
   userEmail,
   userInitials,
   onSignOut,
+  title,
+  subtitle,
   reportHref = "/student/report",
   className = "",
 }: StudentNavbarProps) {
-  const headerClass = `bg-white border-b border-slate-200 px-6 py-6 flex items-center justify-between ${className}`;
+  const headerClass = `sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 px-6 py-6 flex items-center justify-between ${className}`;
 
   return (
     <header className={headerClass.trim()}>
       <div>
         <h1 className="text-2xl font-bold text-slate-900">
-          Welcome back, {firstName}!
+          {title ?? `Welcome back, ${firstName}!`}
         </h1>
         <p className="text-slate-500 mt-1">
-          Here&apos;s an overview of your reported issues.
+          {subtitle ?? "Here&apos;s an overview of your reported issues."}
         </p>
       </div>
 

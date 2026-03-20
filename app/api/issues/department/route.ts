@@ -12,17 +12,13 @@ export async function GET(request: Request) {
 
   const { user } = authResult;
 
-  if (!user.department) {
-    return NextResponse.json(
-      { message: "This account is not associated with a department." },
-      { status: 400 }
-    );
-  }
-
   try {
-    const issues = await Issue.find({ department: user.department })
+    const issues = await Issue.find({ assignedStaff: user._id })
       .populate("student", "name email")
-      .populate("department")
+      .populate("department", "_id name type")
+      .populate("academicDepartment", "_id name type")
+      .populate("serviceDepartment", "_id name type")
+      .populate("assignedStaff", "_id name email")
       .sort({ createdAt: -1 });
 
     return NextResponse.json({ issues });

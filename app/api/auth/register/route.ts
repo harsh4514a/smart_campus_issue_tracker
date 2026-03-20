@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import User from "@/models/User";
+import { deriveStudentMetadataFromEmail } from "@/lib/role-utils";
 
 export async function POST(request: Request) {
   try {
@@ -30,13 +31,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Email is already registered." }, { status: 409 });
     }
 
-    const user = new User({ name, email, password, role: "student", department: null });
+    const { studentId, course } = deriveStudentMetadataFromEmail(email);
+
+    const user = new User({
+      name,
+      email,
+      password,
+      role: "student",
+      department: null,
+      studentId,
+      course,
+    });
     await user.save();
 
     return NextResponse.json(
       {
         message: "Registration successful",
-        user: { id: user._id, name: user.name, email: user.email, role: user.role },
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          studentId: user.studentId ?? null,
+          course: user.course ?? null,
+        },
       },
       { status: 201 }
     );

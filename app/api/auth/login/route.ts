@@ -9,13 +9,22 @@ export async function POST(request: Request) {
     await connectDB();
 
     const { email, password } = await request.json();
+    const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return NextResponse.json({ message: "Email and password are required." }, { status: 400 });
     }
 
-    const user = await User.findOne({ email }).populate("department");
+    const user = await User.findOne({ email: normalizedEmail })
+      .populate("department")
+      .populate("academicDepartment")
+      .populate("serviceDepartment");
     if (!user) {
+      return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
+    }
+
+    // Admin account must authenticate only through /api/auth/admin-login.
+    if (user.role === "admin") {
       return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
     }
 
@@ -39,6 +48,12 @@ export async function POST(request: Request) {
         email: user.email,
         role: user.role,
         department: user.department,
+        academicDepartment: user.academicDepartment,
+        serviceDepartment: user.serviceDepartment,
+        studentId: user.studentId ?? null,
+        institute: user.institute ?? null,
+        course: user.course ?? null,
+        mobileNumber: user.mobileNumber ?? null,
       },
     });
   } catch (error) {

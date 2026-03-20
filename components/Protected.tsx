@@ -11,7 +11,7 @@ export default function Protected({ allowedRoles, children }: { allowedRoles: Us
   useEffect(() => {
     const auth = loadAuth();
     if (!auth) {
-      router.replace("/login");
+      router.replace("/");
       return;
     }
     const role = auth.user.role as UserRole;

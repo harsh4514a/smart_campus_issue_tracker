@@ -9,8 +9,18 @@ export async function GET(request: Request) {
   if (auth instanceof Response) return auth;
 
   const issues = await Issue.find()
-    .populate("student", "name email")
+    .populate({
+      path: "student",
+      select: "name email department academicDepartment course",
+      populate: [
+        { path: "department", select: "_id name type" },
+        { path: "academicDepartment", select: "_id name type" },
+      ],
+    })
     .populate("department")
+    .populate("academicDepartment")
+    .populate("serviceDepartment")
+    .populate("assignedStaff", "name email")
     .sort({ createdAt: -1 });
 
   return NextResponse.json({ issues });

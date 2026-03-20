@@ -72,7 +72,7 @@ function UserMenu({ name, email, initials, onSignOut }: UserMenuProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-slate-100 bg-white shadow-xl ring-1 ring-slate-900/5">
+        <div className="absolute right-0 z-50 mt-3 w-64 rounded-2xl border border-slate-100 bg-white shadow-xl ring-1 ring-slate-900/5">
           <div className="px-4 py-4 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-900">{name}</p>
             <p className="text-xs text-slate-500 truncate">{email}</p>

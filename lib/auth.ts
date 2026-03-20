@@ -40,7 +40,10 @@ export async function authenticateRequest(
       return new Response(JSON.stringify({ message: "Forbidden" }), { status: 403 });
     }
 
-    const user = await User.findById(decoded.userId).populate("department");
+    const user = await User.findById(decoded.userId)
+      .populate("department")
+      .populate("academicDepartment")
+      .populate("serviceDepartment");
 
     if (!user) {
       return new Response(JSON.stringify({ message: "User not found" }), { status: 401 });

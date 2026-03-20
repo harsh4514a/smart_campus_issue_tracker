@@ -3,7 +3,7 @@ import connectDB from "@/lib/db";
 import User from "@/models/User";
 import Otp from "@/models/Otp";
 import { signToken } from "@/lib/auth";
-import { deriveRoleFromEmail } from "@/lib/role-utils";
+import { deriveRoleFromEmail, deriveStudentMetadataFromEmail } from "@/lib/role-utils";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 
@@ -46,6 +46,7 @@ export async function POST(request: Request) {
     }
 
     const derivedRole = otpRecord.role || deriveRoleFromEmail(otpRecord.email);
+    const { studentId, course } = deriveStudentMetadataFromEmail(otpRecord.email);
 
     const user = new User({
       name: otpRecord.name,
@@ -53,6 +54,8 @@ export async function POST(request: Request) {
       password: otpRecord.passwordHash,
       role: derivedRole,
       department: null,
+      studentId,
+      course,
     });
 
     await user.save();
@@ -67,7 +70,14 @@ export async function POST(request: Request) {
     return NextResponse.json({
       message: "Verification successful",
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        studentId: user.studentId ?? null,
+        course: user.course ?? null,
+      },
     });
   } catch (error) {
     console.error("Verify OTP error", error);
