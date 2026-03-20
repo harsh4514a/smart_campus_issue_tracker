@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
 import { StudentSidebar } from "@/app/student/components/StudentSidebar";
@@ -30,6 +30,44 @@ export default function StudentProfilePage() {
   const [fullName, setFullName] = useState(displayName);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!auth) return;
+
+    authFetch("/api/users/me", { method: "GET" }, auth.token)
+      .then((response) => {
+        const user = response?.user;
+        if (!user) return;
+
+        const liveName = user.name?.trim() || auth.user.name?.trim() || auth.user.email || "Student";
+        const liveStudentId = (user.studentId || getStudentIdFromEmail(user.email || userEmail)).toUpperCase();
+        const liveCourse = (user.course || getCourseFromEmail(user.email || userEmail)).toUpperCase();
+        const liveInstitute = user.institute || "";
+        const liveMobile = user.mobileNumber || "";
+
+        setDisplayName(liveName);
+        setFullName(liveName);
+        setStudentId(liveStudentId);
+        setInstitute(liveInstitute);
+        setCourse(liveCourse);
+        setMobileNumber(liveMobile);
+
+        saveAuth({
+          ...auth,
+          user: {
+            ...auth.user,
+            name: liveName,
+            studentId: liveStudentId || null,
+            institute: liveInstitute || null,
+            course: liveCourse || null,
+            mobileNumber: liveMobile || null,
+          },
+        });
+      })
+      .catch(() => {
+        // Keep locally available values if live fetch fails.
+      });
+  }, [auth, userEmail]);
+
   const handleSave = async () => {
     if (!auth) {
       showToast({ message: "Authentication expired. Please log in again.", variant: "error" });
@@ -44,9 +82,9 @@ export default function StudentProfilePage() {
 
     setSaving(true);
 
-  const trimmedStudentId = defaultStudentId.trim().toUpperCase();
+    const trimmedStudentId = studentId.trim().toUpperCase();
     const trimmedInstitute = institute.trim();
-  const trimmedCourse = defaultCourse.trim().toUpperCase();
+    const trimmedCourse = course.trim().toUpperCase();
     const trimmedMobile = mobileNumber.trim();
 
     try {
@@ -72,9 +110,9 @@ export default function StudentProfilePage() {
       const updatedMobile = response?.user?.mobileNumber ?? trimmedMobile;
       setDisplayName(updatedName);
       setFullName(updatedName);
-      setStudentId((updatedStudentId || defaultStudentId).toUpperCase());
+      setStudentId((updatedStudentId || trimmedStudentId).toUpperCase());
       setInstitute(updatedInstitute || "");
-      setCourse((updatedCourse || defaultCourse).toUpperCase());
+      setCourse((updatedCourse || trimmedCourse).toUpperCase());
       setMobileNumber(updatedMobile || "");
       saveAuth({
         ...auth,

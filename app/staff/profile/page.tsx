@@ -47,8 +47,26 @@ export default function StaffProfilePage() {
     authFetch("/api/users/me", { method: "GET" }, currentAuth.token)
       .then((response) => {
         const user = response?.user;
+        setForm((prev) => ({
+          ...prev,
+          name: user?.name || prev.name,
+          email: user?.email || prev.email,
+          mobileNumber: user?.mobileNumber || "",
+        }));
         setAcademicDepartment(resolveDepartmentName(user?.academicDepartment));
         setServiceDepartment(resolveDepartmentName(user?.serviceDepartment));
+
+        saveAuth({
+          ...currentAuth,
+          user: {
+            ...currentAuth.user,
+            name: user?.name || currentAuth.user.name,
+            email: user?.email || currentAuth.user.email,
+            mobileNumber: user?.mobileNumber || null,
+            academicDepartment: user?.academicDepartment || currentAuth.user.academicDepartment || null,
+            serviceDepartment: user?.serviceDepartment || currentAuth.user.serviceDepartment || null,
+          },
+        }, "session");
       })
       .catch(() => {
         // keep local values when fetch fails
