@@ -3,10 +3,12 @@ import connectDB from "@/lib/db";
 import User from "@/models/User";
 import "@/models/Department"; 
 import { signToken } from "@/lib/auth";
+import { ensureDemoUsers } from "@/lib/demo-users";
 
 export async function POST(request: Request) {
   try {
     await connectDB();
+    await ensureDemoUsers();
 
     const { email, password } = await request.json();
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
         name: user.name,
         email: user.email,
         role: user.role,
+        isDemoUser: Boolean(user.isDemoUser),
         department: user.department,
         academicDepartment: user.academicDepartment,
         serviceDepartment: user.serviceDepartment,

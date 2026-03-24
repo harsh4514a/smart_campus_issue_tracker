@@ -16,6 +16,14 @@ if (!JWT_SECRET) {
 
 const jwtSecret = JWT_SECRET as string;
 
+const DEMO_EMAILS = new Set(
+  [
+    process.env.DEMO_STUDENT_EMAIL || "demo.student@charusat.edu.in",
+    process.env.DEMO_STAFF_EMAIL || "demo.worker@charusat.ac.in",
+    process.env.DEMO_ADMIN_EMAIL || "demo.admin@campustracker.com",
+  ].map((email) => email.trim().toLowerCase())
+);
+
 export function signToken(payload: AuthTokenPayload) {
   return jwt.sign(payload, jwtSecret, { expiresIn: "7d" });
 }
@@ -34,7 +42,7 @@ export async function authenticateRequest(
   const token = authHeader.split(" ")[1];
 
   try {
-  const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload & AuthTokenPayload;
+    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload & AuthTokenPayload;
 
     if (allowedRoles && !allowedRoles.includes(decoded.role)) {
       return new Response(JSON.stringify({ message: "Forbidden" }), { status: 403 });
@@ -47,6 +55,13 @@ export async function authenticateRequest(
 
     if (!user) {
       return new Response(JSON.stringify({ message: "User not found" }), { status: 401 });
+    }
+
+    const method = request.method.toUpperCase();
+    const isReadOnlyMethod = method === "GET" || method === "HEAD" || method === "OPTIONS";
+    const isDemoUser = Boolean(user.isDemoUser) || DEMO_EMAILS.has(String(user.email || "").trim().toLowerCase());
+    if (isDemoUser && !isReadOnlyMethod) {
+      return new Response(JSON.stringify({ message: "Demo account is view-only." }), { status: 403 });
     }
 
     return { user };

@@ -8,6 +8,7 @@ export interface IUser extends Document {
   email: string;
   password: string;
   role: UserRole;
+  isDemoUser?: boolean;
   department?: mongoose.Types.ObjectId | null;
   academicDepartment?: mongoose.Types.ObjectId | null;
   serviceDepartment?: mongoose.Types.ObjectId | null;
@@ -35,6 +36,7 @@ const UserSchema = new Schema<IUser>(
       required: true,
       default: "student",
     },
+    isDemoUser: { type: Boolean, default: false },
     department: { type: Schema.Types.ObjectId, ref: "Department", default: null },
     academicDepartment: { type: Schema.Types.ObjectId, ref: "Department", default: null },
     serviceDepartment: { type: Schema.Types.ObjectId, ref: "Department", default: null },
@@ -103,6 +105,12 @@ if (cachedUserModel && !cachedUserModel.schema.path("course")) {
 if (cachedUserModel && !cachedUserModel.schema.path("mobileNumber")) {
   cachedUserModel.schema.add({
     mobileNumber: { type: String, trim: true, default: null },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("isDemoUser")) {
+  cachedUserModel.schema.add({
+    isDemoUser: { type: Boolean, default: false },
   });
 }
 

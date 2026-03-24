@@ -9,6 +9,7 @@ export interface StoredAuth {
     name: string;
     email: string;
     role: UserRole;
+    isDemoUser?: boolean;
     department?: { _id?: string; name?: string } | null;
     academicDepartment?: { _id?: string; name?: string } | null;
     serviceDepartment?: { _id?: string; name?: string } | null;

@@ -5,9 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveAuth } from "@/lib/client-auth";
 
-const ADMIN_EMAIL = "admin@campustracker.com";
-const ADMIN_PASSWORD = "admin123";
-
 export default function AdminLoginPage() {
   const router = useRouter();
 
@@ -30,11 +27,6 @@ export default function AdminLoginPage() {
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-
-      if (normalizedEmail !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
-        setError("Invalid credentials.");
-        return;
-      }
 
       const res = await fetch("/api/auth/admin-login", {
         method: "POST",
