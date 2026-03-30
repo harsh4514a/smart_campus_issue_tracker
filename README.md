@@ -77,7 +77,7 @@ This platform provides a **role-based, centralized solution** to track issues, a
 - Role-Based Access Control (RBAC):  
   Admin | Department Admin | Staff | Student | Faculty  
 
-- 47 RESTful APIs handling:
+- 45+ RESTful APIs handling:
   - Issue creation  
   - Assignment  
   - Status updates  
@@ -129,21 +129,21 @@ You can override these credentials using environment variables from `env.example
 ## 🛠️ Installation
 
 Clone the repository:
-
+```bash
 git clone https://github.com/your-username/smart-campus-issue-tracker.git
-
+```
 Navigate to project folder:
-
+```bash
 cd smart-campus-issue-tracker
-
+```
 Install dependencies:
-
+```bash
  npm install
-
+```
 Run development server:
-
+```bash
  npm run dev
-
+```
 ---
 
 ## 🎯 Highlights
