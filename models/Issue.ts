@@ -11,6 +11,8 @@ export interface IIssue extends Document {
   normalizedTitle: string;
   locationKey: string;
   imageUrl?: string | null;
+  attachments?: string[];
+  resolutionAttachments?: string[];
   status: IssueStatus;
   student: mongoose.Types.ObjectId;
   department: mongoose.Types.ObjectId | null;
@@ -18,6 +20,10 @@ export interface IIssue extends Document {
   serviceDepartment: mongoose.Types.ObjectId | null;
   assignedStaff: mongoose.Types.ObjectId | null;
   priority?: IssuePriority | null;
+  dueDate?: Date | null;
+  overdueNotifiedAt?: Date | null;
+  recurring?: boolean;
+  tags?: string[];
   createdAt: Date;
 }
 
@@ -29,7 +35,9 @@ const IssueSchema = new Schema<IIssue>(
     location: { type: String, required: true, trim: true },
     normalizedTitle: { type: String, default: "", index: true },
     locationKey: { type: String, default: "", index: true },
-  imageUrl: { type: String, default: null },
+    imageUrl: { type: String, default: null },
+    attachments: { type: [String], default: [] },
+    resolutionAttachments: { type: [String], default: [] },
     status: {
       type: String,
       enum: ["Pending", "In Progress", "Resolved", "Rejected"],
@@ -45,9 +53,25 @@ const IssueSchema = new Schema<IIssue>(
       enum: ["Low", "Medium", "High", "Urgent"],
       default: null,
     },
+    dueDate: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    overdueNotifiedAt: { type: Date, default: null },
+    recurring: { type: Boolean, default: false, index: true },
+    tags: { type: [String], default: [] },
   },
   { timestamps: { createdAt: true, updatedAt: true } }
 );
+
+// Query indexes for issue list filtering/sorting in admin and department-admin views.
+IssueSchema.index({ status: 1, createdAt: -1 });
+IssueSchema.index({ department: 1, createdAt: -1 });
+IssueSchema.index({ academicDepartment: 1, createdAt: -1 });
+IssueSchema.index({ serviceDepartment: 1, createdAt: -1 });
+IssueSchema.index({ category: 1, createdAt: -1 });
+IssueSchema.index({ assignedStaff: 1, status: 1, createdAt: -1 });
 
 const cachedIssueModel = mongoose.models.Issue as Model<IIssue> | undefined;
 
@@ -76,6 +100,42 @@ if (cachedIssueModel && !cachedIssueModel.schema.path("priority")) {
       enum: ["Low", "Medium", "High", "Urgent"],
       default: null,
     },
+  });
+}
+
+if (cachedIssueModel && !cachedIssueModel.schema.path("dueDate")) {
+  cachedIssueModel.schema.add({
+    dueDate: { type: Date, default: null, index: true },
+  });
+}
+
+if (cachedIssueModel && !cachedIssueModel.schema.path("attachments")) {
+  cachedIssueModel.schema.add({
+    attachments: { type: [String], default: [] },
+  });
+}
+
+if (cachedIssueModel && !cachedIssueModel.schema.path("resolutionAttachments")) {
+  cachedIssueModel.schema.add({
+    resolutionAttachments: { type: [String], default: [] },
+  });
+}
+
+if (cachedIssueModel && !cachedIssueModel.schema.path("overdueNotifiedAt")) {
+  cachedIssueModel.schema.add({
+    overdueNotifiedAt: { type: Date, default: null },
+  });
+}
+
+if (cachedIssueModel && !cachedIssueModel.schema.path("recurring")) {
+  cachedIssueModel.schema.add({
+    recurring: { type: Boolean, default: false, index: true },
+  });
+}
+
+if (cachedIssueModel && !cachedIssueModel.schema.path("tags")) {
+  cachedIssueModel.schema.add({
+    tags: { type: [String], default: [] },
   });
 }
 

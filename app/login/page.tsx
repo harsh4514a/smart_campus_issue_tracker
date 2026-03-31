@@ -1,7 +1,8 @@
 "use client";
 
+import { Suspense } from "react";
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { authFetch, getRedirectPath, saveAuth } from "@/lib/client-auth";
 import Link from "next/link";
 import HomeNavbar from "@/components/HomeNavbar";
@@ -9,13 +10,31 @@ import { useToast } from "@/components/ToastProvider";
 import { Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
+  );
+}
+
+function LoginPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  const redirectParam = searchParams.get("redirect") || "";
+  const safeRedirect =
+    redirectParam.startsWith("/") &&
+    !redirectParam.startsWith("//") &&
+    !redirectParam.startsWith("/admin") &&
+    !redirectParam.startsWith("/dept-admin")
+      ? redirectParam
+      : null;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -35,7 +54,7 @@ export default function LoginPage() {
 
       saveAuth({ token: data.token, user: data.user });
       showToast({ message: "Login successful! Redirecting...", variant: "success" });
-      router.replace(getRedirectPath(data.user.role));
+      router.replace(safeRedirect || getRedirectPath(data.user.role, data.user.adminRole));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Login failed";
       showToast({ message, variant: "error" });
@@ -56,7 +75,7 @@ export default function LoginPage() {
             <div className="bg-linear-to-r from-emerald-700 to-teal-700 px-10 py-12 text-center text-white">
               <h1 className="text-3xl font-bold mb-3">Welcome Back</h1>
               <p className="text-emerald-100/90">
-                Sign in to CampusTrack • Use your college email
+                Sign in to CampusTracker • Use your college email
               </p>
             </div>
 
@@ -139,7 +158,7 @@ export default function LoginPage() {
       {/* Footer - same as Register */}
       <footer className="border-t border-emerald-800/40 bg-emerald-950/60 backdrop-blur-md py-6 text-center text-emerald-300/80 text-sm">
         <div className="max-w-7xl mx-auto px-6">
-          <p>© {new Date().getFullYear()} CampusTrack. Smart Campus Issue Tracker.</p>
+          <p>© {new Date().getFullYear()} CampusTracker. Smart Campus Issue Tracker.</p>
         </div>
       </footer>
     </div>

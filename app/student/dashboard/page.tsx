@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { useMemo, type ComponentType } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
 import { StudentSidebar } from "@/app/student/components/StudentSidebar";
 import { StudentNavbar } from "@/app/student/components/StudentNavbar";
-import { authFetch, clearAuth, loadAuth } from "@/lib/client-auth";
+import { clearAuth, loadAuth } from "@/lib/client-auth";
+import { useStudentIssues, type StudentIssue } from "@/app/student/components/useStudentIssues";
 import {
   CheckCircle2,
   ClipboardList,
@@ -14,17 +15,6 @@ import {
   Loader2,
   PlusCircle,
 } from "lucide-react";
-
-/* ================= TYPES ================= */
-
-type Issue = {
-  _id: string;
-  title?: string;
-  status: "Pending" | "In Progress" | "Resolved" | string;
-  createdAt?: string;
-  location?: string;
-  category?: string;
-};
 
 interface SummaryCardProps {
   label: string;
@@ -34,20 +24,17 @@ interface SummaryCardProps {
   loading: boolean;
 }
 
-const POLL_INTERVAL_MS = 10000;
-
 /* ================= PAGE ================= */
 
 export default function StudentDashboard() {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useMemo(() => loadAuth(), []);
-  const cacheKey = "scit_dashboard_issues";
-  const cacheTtlMs = 2 * 60 * 1000;
-  const cachedIssues = readCachedIssues(cacheKey, cacheTtlMs);
-  const [issues, setIssues] = useState<Issue[]>(() => cachedIssues || []);
-  const [loading, setLoading] = useState(() => Boolean(auth) && !cachedIssues);
-  const [error, setError] = useState<string | null>(null);
+  const { issues, loading, error } = useStudentIssues({
+    cacheKey: "scit_dashboard_issues",
+    cacheTtlMs: 2 * 60 * 1000,
+    pollIntervalMs: 15 * 1000,
+  });
 
   const userName = auth?.user.name || auth?.user.email || "Student";
   const userEmail = auth?.user.email || "student@example.com";
@@ -59,38 +46,6 @@ export default function StudentDashboard() {
     clearAuth();
     router.replace("/login");
   };
-
-  useEffect(() => {
-    if (!auth) return;
-
-    authFetch("/api/issues/mine", { method: "GET" }, auth.token)
-      .then((res) => {
-        const latest = res.issues || [];
-        setIssues(latest);
-        writeCachedIssues(cacheKey, latest);
-      })
-      .catch(() => setError("Failed to load issues"))
-      .finally(() => setLoading(false));
-  }, [auth, cacheKey, cacheTtlMs]);
-
-  useEffect(() => {
-    if (!auth) return;
-
-    const intervalId = window.setInterval(() => {
-      authFetch("/api/issues/mine", { method: "GET" }, auth.token)
-        .then((res) => {
-          const latest = res.issues || [];
-          setIssues(latest);
-          writeCachedIssues(cacheKey, latest);
-          setError(null);
-        })
-        .catch(() => {
-          // keep existing data on transient polling failures
-        });
-    }, POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [auth, cacheKey]);
 
   const stats = useMemo(() => {
     const total = issues.length;
@@ -227,7 +182,7 @@ function SummaryCard({ label, value, icon: Icon, accent, loading }: SummaryCardP
   );
 }
 
-function RecentIssueCard({ issue }: { issue: Issue }) {
+function RecentIssueCard({ issue }: { issue: StudentIssue }) {
   return (
     <div className="rounded-lg border border-slate-200 p-4 hover:bg-slate-50">
       <p className="text-xs text-slate-500">{formatDate(issue.createdAt)}</p>
@@ -310,27 +265,4 @@ function getInitials(value: string) {
 function formatRoleLabel(role?: string) {
   if (!role) return "Student";
   return role.charAt(0).toUpperCase() + role.slice(1);
-}
-
-function readCachedIssues(key: string, ttlMs: number) {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { timestamp: number; issues: Issue[] };
-    if (!parsed.timestamp || !Array.isArray(parsed.issues)) return null;
-    if (Date.now() - parsed.timestamp > ttlMs) return null;
-    return parsed.issues;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedIssues(key: string, issues: Issue[]) {
-  if (typeof window === "undefined") return;
-  try {
-    sessionStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), issues }));
-  } catch {
-    // ignore storage failures
-  }
 }

@@ -9,9 +9,17 @@ import { StudentSidebar } from "@/app/student/components/StudentSidebar";
 import { StudentUserActions } from "@/app/student/components/StudentUserActions";
 import { authFetch, clearAuth, loadAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
-import { UploadCloud } from "lucide-react";
+import { Info, UploadCloud } from "lucide-react";
 
 const areaTypes = ["Classroom", "Lab", "Office", "Corridor", "Washroom", "Common Area", "Other"];
+const categoryExamples: Record<string, string> = {
+  Cleaning: "Examples: Dirty classroom, uncleared dustbin, washroom cleanliness",
+  Electrical: "Examples: Fan not working, lights off, AC power issue",
+  "IT Support": "Examples: Login issue, projector not connecting, system error",
+  "Network / Internet": "Examples: WiFi not working, slow internet, no connectivity",
+  Plumbing: "Examples: Water leakage, tap issue, washroom pipeline problem",
+  Furniture: "Examples: Broken chair, damaged desk, door problem",
+};
 type Department = { _id: string; name: string; type?: "Academic" | "Service" };
 
 export default function StudentReportPage() {
@@ -28,7 +36,7 @@ export default function StudentReportPage() {
     category: "",
     title: "",
     description: "",
-    building: "",
+    departmentId: "",
     room: "",
     area: "",
   });
@@ -36,6 +44,8 @@ export default function StudentReportPage() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [customArea, setCustomArea] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(true);
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const serviceCategories = useMemo(() => {
@@ -47,8 +57,15 @@ export default function StudentReportPage() {
     return Array.from(new Set(categories));
   }, [departments]);
 
+  const academicDepartments = useMemo(() => {
+    return departments.filter((department) => department.type === "Academic");
+  }, [departments]);
+
   useEffect(() => {
     if (!auth) return;
+
+    setDepartmentsLoading(true);
+    setDepartmentsError(null);
 
     authFetch("/api/departments", { method: "GET" }, auth.token)
       .then((data) => {
@@ -57,7 +74,11 @@ export default function StudentReportPage() {
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : "Failed to load departments";
+        setDepartmentsError(message);
         showToast({ message, variant: "error" });
+      })
+      .finally(() => {
+        setDepartmentsLoading(false);
       });
   }, [auth, showToast]);
 
@@ -74,10 +95,28 @@ export default function StudentReportPage() {
       return;
     }
 
+    if (departmentsLoading) {
+      showToast({ message: "Departments are still loading. Please wait.", variant: "info" });
+      return;
+    }
+
+    if (academicDepartments.length === 0 || serviceCategories.length === 0) {
+      showToast({ message: "Issue categories are unavailable right now. Please try again shortly.", variant: "error" });
+      return;
+    }
+
+    if (form.area === "Other" && !customArea.trim()) {
+      showToast({ message: "Please specify the area.", variant: "error" });
+      return;
+    }
+
     setLoading(true);
 
     const areaValue = form.area === "Other" ? customArea.trim() : form.area;
-    const location = [form.building, form.room, areaValue].filter(Boolean).join(" · ") || "Not specified";
+    const selectedAcademicDepartment = academicDepartments.find((department) => department._id === form.departmentId);
+    const location = [selectedAcademicDepartment?.name || "", form.room, areaValue]
+      .filter(Boolean)
+      .join(" · ") || "Not specified";
 
     try {
       await authFetch(
@@ -89,12 +128,13 @@ export default function StudentReportPage() {
             description: form.description.trim() || undefined,
             category: form.category,
             location,
+            departmentId: form.departmentId,
             imageUrl: photoPreview,
           }),
         },
         auth.token,
       );
-      showToast({ message: "Issue submitted successfully. Redirecting...", variant: "success" });
+      showToast({ message: "Issue created successfully. Redirecting...", variant: "success" });
       router.push("/student/my-issues");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to submit issue";
@@ -134,18 +174,34 @@ export default function StudentReportPage() {
             <div className="mx-auto max-w-3xl">
               <section className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm">
                 <form className="space-y-6" onSubmit={onSubmit}>
+                  {departmentsError ? (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                      {departmentsError}
+                    </div>
+                  ) : null}
+
                   <div className="grid gap-6">
                     <div className="space-y-2">
-                      <FieldLabel htmlFor="category" label="Category" required description="Select the closest category" />
+                      <div className="flex items-start justify-between gap-2">
+                        <FieldLabel htmlFor="category" label="Category" required description="Select the closest category" />
+                        <span
+                          className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-500"
+                          title="Select the category that best matches your issue to ensure faster resolution"
+                          aria-label="Category guidance"
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                        </span>
+                      </div>
                       <select
                         id="category"
                         value={form.category}
                         onChange={(e) => handleChange("category")(e.target.value)}
                         required
+                        disabled={departmentsLoading}
                         className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                       >
                         <option value="" disabled>
-                          Select a category
+                          {departmentsLoading ? "Loading categories..." : "Select a category"}
                         </option>
                         {serviceCategories.map((category) => (
                           <option key={category} value={category}>
@@ -153,6 +209,9 @@ export default function StudentReportPage() {
                           </option>
                         ))}
                       </select>
+                      {form.category ? (
+                        <p className="text-xs text-slate-600">{categoryExamples[form.category] || `Examples: Issues related to ${form.category}`}</p>
+                      ) : null}
                     </div>
 
                     <div className="space-y-2">
@@ -181,24 +240,45 @@ export default function StudentReportPage() {
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-3">
-                      <TextField
-                        id="building"
-                        label="Building"
-                        placeholder="e.g., DEPSTAR CSE"
-                        required
-                        value={form.building}
-                        onChange={handleChange("building")}
-                      />
+                      <div className="space-y-2">
+                        <FieldLabel
+                          htmlFor="department"
+                          label="Department"
+                          required
+                          description="Select where issue occurred"
+                        />
+                        <select
+                          id="department"
+                          value={form.departmentId}
+                          onChange={(e) => handleChange("departmentId")(e.target.value)}
+                          required
+                          disabled={departmentsLoading}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                        >
+                          <option value="" disabled>
+                            {departmentsLoading ? "Loading departments..." : "Select academic department"}
+                          </option>
+                          {academicDepartments.map((department) => (
+                            <option key={department._id} value={department._id}>
+                              {department.name}
+                            </option>
+                          ))}
+                        </select>
+                        {academicDepartments.length === 0 ? (
+                          <p className="text-xs text-rose-600">No academic departments available. Please contact admin.</p>
+                        ) : null}
+                      </div>
                       <TextField
                         id="room"
                         label="Room"
+                        description="Enter class or room number"
                         placeholder="e.g., 101"
                         required
                         value={form.room}
                         onChange={handleChange("room")}
                       />
                       <div className="space-y-2">
-                        <FieldLabel htmlFor="area" label="Area" required />
+                        <FieldLabel htmlFor="area" label="Area" required description="Select issue area" />
                         <select
                           id="area"
                           value={form.area}
@@ -274,10 +354,10 @@ export default function StudentReportPage() {
                     </Link>
                     <button
                       type="submit"
-                      disabled={loading}
+                      disabled={loading || departmentsLoading}
                       className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {loading ? "Submitting..." : "Submit Issue"}
+                      {loading ? "Submitting..." : departmentsLoading ? "Loading data..." : "Submit Issue"}
                     </button>
                   </div>
                 </form>
@@ -330,9 +410,10 @@ function FieldLabel({ htmlFor, label, description, required }: { htmlFor: string
   );
 }
 
-function TextField({ id, label, placeholder, value, onChange, required }: {
+function TextField({ id, label, description, placeholder, value, onChange, required }: {
   id: string;
   label: string;
+  description?: string;
   placeholder?: string;
   value: string;
   onChange: (value: string) => void;
@@ -340,7 +421,7 @@ function TextField({ id, label, placeholder, value, onChange, required }: {
 }) {
   return (
     <div className="space-y-2">
-      <FieldLabel htmlFor={id} label={label} required={required} />
+      <FieldLabel htmlFor={id} label={label} required={required} description={description} />
       <input
         id={id}
         type="text"

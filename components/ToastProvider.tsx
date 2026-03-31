@@ -25,7 +25,7 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const showToast = useCallback<ToastContextValue["showToast"]>(
-    ({ title, message, variant = "info", durationMs = 4000 }) => {
+    ({ title, message, variant = "info", durationMs = 3000 }) => {
       const id = crypto.randomUUID();
       setToasts((prev) => [...prev, { id, title, message, variant }]);
       window.setTimeout(() => removeToast(id), durationMs);

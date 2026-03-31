@@ -16,7 +16,7 @@ export default function Protected({ allowedRoles, children }: { allowedRoles: Us
     }
     const role = auth.user.role as UserRole;
     if (!allowedRoles.includes(role)) {
-      router.replace(getRedirectPath(role));
+      router.replace(getRedirectPath(role, auth.user.adminRole));
       return;
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect

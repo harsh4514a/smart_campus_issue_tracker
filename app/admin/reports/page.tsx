@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AdminProtected from "@/components/AdminProtected";
 import AdminShell from "@/components/admin/AdminShell";
 import { authFetch, loadAuth } from "@/lib/client-auth";
@@ -35,7 +35,7 @@ import {
   YAxis,
 } from "recharts";
 
-type IssueStatus = "Pending" | "In Progress" | "Resolved";
+type IssueStatus = "Pending" | "In Progress" | "Resolved" | "Rejected";
 type IssuePriority = "Low" | "Medium" | "High" | "Urgent";
 
 type Issue = {
@@ -51,13 +51,19 @@ type Issue = {
   department?: { _id?: string; name?: string; type?: "Academic" | "Service" } | null;
   serviceDepartment?: { _id?: string; name?: string; type?: "Academic" | "Service" } | null;
   academicDepartment?: { _id?: string; name?: string; type?: "Academic" | "Service" } | null;
+  recurring?: boolean;
 };
 
 type DateRangeFilter = "All" | "7d" | "30d" | "90d";
-type StatusSortDirection = "asc" | "desc";
+type TableSort = "date_desc" | "date_asc" | "status" | "department" | "priority";
 
 const POLL_INTERVAL_MS = 10000;
 const REFERENCE_TIMESTAMP = Date.now();
+
+type FeedbackSummary = {
+  averageRating: number;
+  total: number;
+};
 
 export default function AdminReportsPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -67,8 +73,63 @@ export default function AdminReportsPage() {
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeFilter>("All");
-  const [statusSortDirection, setStatusSortDirection] = useState<StatusSortDirection>("asc");
+  const [tableSort, setTableSort] = useState<TableSort>("date_desc");
+  const [tableSearch, setTableSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary>({ averageRating: 0, total: 0 });
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const tableSearchRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    document.title = "Reports | CampusTracker Admin";
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "/") {
+        const activeTag = (document.activeElement as HTMLElement | null)?.tagName?.toLowerCase();
+        if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") return;
+        event.preventDefault();
+        tableSearchRef.current?.focus();
+      }
+
+      if (event.key === "Escape" && selectedIssue) {
+        setSelectedIssue(null);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedIssue]);
+
+  const scopedIssues = useMemo(() => {
+    const startTs = startDate ? new Date(startDate).getTime() : null;
+    const endTs = endDate ? new Date(endDate).getTime() : null;
+
+    return issues.filter((issue) => {
+      const issueDepartment =
+        issue.serviceDepartment?.name || issue.academicDepartment?.name || issue.department?.name || "Unassigned";
+      const departmentMatch = departmentFilter === "All" ? true : issueDepartment === departmentFilter;
+      if (!departmentMatch) return false;
+
+      if (!startTs && !endTs) return true;
+      if (!issue.createdAt) return false;
+      const createdAt = new Date(issue.createdAt).getTime();
+      if (Number.isNaN(createdAt)) return false;
+      if (startTs && createdAt < startTs) return false;
+      if (endTs) {
+        const endOfDay = endTs + (24 * 60 * 60 * 1000 - 1);
+        if (createdAt > endOfDay) return false;
+      }
+      return true;
+    });
+  }, [departmentFilter, endDate, issues, startDate]);
 
   const load = (silent = false) => {
     const auth = loadAuth();
@@ -78,9 +139,16 @@ export default function AdminReportsPage() {
       setLoading(true);
     }
 
-    authFetch("/api/admin/issues", { method: "GET" }, auth.token)
-      .then((data) => {
+    Promise.all([
+      authFetch("/api/admin/issues", { method: "GET" }, auth.token),
+      authFetch("/api/admin/feedback/summary", { method: "GET" }, auth.token),
+    ])
+      .then(([data, feedback]) => {
         setIssues((data.issues || []) as Issue[]);
+        setFeedbackSummary({
+          averageRating: Number(feedback.averageRating || 0),
+          total: Number(feedback.total || 0),
+        });
         setError(null);
       })
       .catch((err) => {
@@ -115,22 +183,22 @@ export default function AdminReportsPage() {
   }, []);
 
   const summary = useMemo(() => {
-    const total = issues.length;
-    const pending = issues.filter((issue) => issue.status === "Pending").length;
-    const inProgress = issues.filter((issue) => issue.status === "In Progress").length;
-    const resolved = issues.filter((issue) => issue.status === "Resolved").length;
-    const assigned = issues.filter((issue) => Boolean(issue.assignedStaff?._id)).length;
+    const total = scopedIssues.length;
+    const pending = scopedIssues.filter((issue) => issue.status === "Pending").length;
+    const inProgress = scopedIssues.filter((issue) => issue.status === "In Progress").length;
+    const resolved = scopedIssues.filter((issue) => issue.status === "Resolved").length;
+    const assigned = scopedIssues.filter((issue) => Boolean(issue.assignedStaff?._id)).length;
     const resolvedRate = total > 0 ? Math.round((resolved / total) * 100) : 0;
 
     return { total, pending, inProgress, resolved, assigned, resolvedRate };
-  }, [issues]);
+  }, [scopedIssues]);
 
   const statusDonutData = useMemo(() => {
-    const pending = issues.filter((issue) => issue.status === "Pending" && !issue.assignedStaff?._id).length;
-    const assigned = issues.filter((issue) => issue.status === "Pending" && !!issue.assignedStaff?._id).length;
-    const inProgress = issues.filter((issue) => issue.status === "In Progress").length;
-    const resolved = issues.filter((issue) => issue.status === "Resolved").length;
-    const total = Math.max(issues.length, 1);
+    const pending = scopedIssues.filter((issue) => issue.status === "Pending").length;
+    const inProgress = scopedIssues.filter((issue) => issue.status === "In Progress").length;
+    const resolved = scopedIssues.filter((issue) => issue.status === "Resolved").length;
+    const rejected = scopedIssues.filter((issue) => issue.status === "Rejected").length;
+    const total = Math.max(scopedIssues.length, 1);
 
     return [
       {
@@ -141,17 +209,10 @@ export default function AdminReportsPage() {
         percent: Math.round((pending / total) * 100),
       },
       {
-        name: "Assigned",
-        value: assigned,
-        renderValue: assigned === 0 ? 0.0001 : assigned,
-        color: "#2563EB",
-        percent: Math.round((assigned / total) * 100),
-      },
-      {
         name: "In Progress",
         value: inProgress,
         renderValue: inProgress === 0 ? 0.0001 : inProgress,
-        color: "#7C3AED",
+        color: "#2563EB",
         percent: Math.round((inProgress / total) * 100),
       },
       {
@@ -161,12 +222,19 @@ export default function AdminReportsPage() {
         color: "#16A34A",
         percent: Math.round((resolved / total) * 100),
       },
+      {
+        name: "Rejected",
+        value: rejected,
+        renderValue: rejected === 0 ? 0.0001 : rejected,
+        color: "#DC2626",
+        percent: Math.round((rejected / total) * 100),
+      },
     ];
-  }, [issues]);
+  }, [scopedIssues]);
 
   const departmentChartData = useMemo(() => {
     const map = new Map<string, number>();
-    issues.forEach((issue) => {
+    scopedIssues.forEach((issue) => {
       const departmentName =
         issue.serviceDepartment?.name || issue.academicDepartment?.name || issue.department?.name || "Unassigned";
       map.set(departmentName, (map.get(departmentName) || 0) + 1);
@@ -176,60 +244,44 @@ export default function AdminReportsPage() {
       .map(([department, count]) => ({ department, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-  }, [issues]);
-
-  const categoryPieData = useMemo(() => {
-    const map = new Map<string, number>();
-    issues.forEach((issue) => {
-      map.set(issue.category, (map.get(issue.category) || 0) + 1);
-    });
-
-    return Array.from(map.entries())
-      .map(([name, value], index) => ({
-        name,
-        value,
-        color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [issues]);
+  }, [scopedIssues]);
 
   const activityTrendData = useMemo(() => {
-    const now = new Date();
-    const months: { key: string; label: string; created: number; resolved: number }[] = [];
+    const dayMap = new Map<string, { date: string; dateTs: number; created: number; resolved: number }>();
 
-    for (let i = 5; i >= 0; i -= 1) {
-      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({
-        key: `${monthDate.getFullYear()}-${monthDate.getMonth()}`,
-        label: monthDate.toLocaleDateString(undefined, { month: "short" }),
-        created: 0,
-        resolved: 0,
-      });
-    }
-
-    const monthMap = new Map(months.map((month) => [month.key, month]));
-
-    issues.forEach((issue) => {
+    scopedIssues.forEach((issue) => {
       if (!issue.createdAt) return;
-      const date = new Date(issue.createdAt);
-      if (Number.isNaN(date.getTime())) return;
-
-      const key = `${date.getFullYear()}-${date.getMonth()}`;
-      const month = monthMap.get(key);
-      if (!month) return;
-
-      month.created += 1;
-      if (issue.status === "Resolved") {
-        month.resolved += 1;
+      const ts = new Date(issue.createdAt).getTime();
+      if (Number.isNaN(ts)) return;
+      const dayKey = new Date(ts).toISOString().slice(0, 10);
+      if (!dayMap.has(dayKey)) {
+        dayMap.set(dayKey, { date: dayKey, dateTs: ts, created: 0, resolved: 0 });
       }
+      const row = dayMap.get(dayKey);
+      if (!row) return;
+      row.created += 1;
+      if (issue.status === "Resolved") row.resolved += 1;
     });
 
-    return months.map((month) => ({
-      month: month.label,
-      created: month.created,
-      resolved: month.resolved,
-    }));
-  }, [issues]);
+    return Array.from(dayMap.values()).sort((a, b) => a.dateTs - b.dateTs);
+  }, [scopedIssues]);
+
+  const recurringInsights = useMemo(() => {
+    const recurringIssues = scopedIssues.filter((issue) => issue.recurring);
+    const recurringCount = recurringIssues.length;
+
+    const categoryMap = new Map<string, number>();
+    recurringIssues.forEach((issue) => {
+      categoryMap.set(issue.category, (categoryMap.get(issue.category) || 0) + 1);
+    });
+
+    const topRecurringCategories = Array.from(categoryMap.entries())
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    return { recurringCount, topRecurringCategories };
+  }, [scopedIssues]);
 
   const trendIndicators = useMemo(() => {
     const latest = activityTrendData[activityTrendData.length - 1] || { created: 0, resolved: 0 };
@@ -248,6 +300,19 @@ export default function AdminReportsPage() {
       resolved: resolvedTrend,
     };
   }, [activityTrendData]);
+
+  const dashboardInsights = useMemo(() => {
+    const total = summary.total || 1;
+    const pendingPercent = Math.round((summary.pending / total) * 100);
+    const topDepartment = departmentChartData[0];
+
+    return {
+      pendingPercent,
+      topDepartmentText: topDepartment
+        ? `${topDepartment.department} has the highest workload (${topDepartment.count} issues)`
+        : "No department workload data yet",
+    };
+  }, [departmentChartData, summary.pending, summary.total]);
 
   const departmentOptions = useMemo(() => {
     const values = new Set<string>();
@@ -277,6 +342,8 @@ export default function AdminReportsPage() {
             ? 90 * 24 * 60 * 60 * 1000
             : null;
 
+    const normalizedQuery = tableSearch.trim().toLowerCase();
+
     const filtered = issues.filter((issue) => {
       const issueDepartment =
         issue.serviceDepartment?.name || issue.academicDepartment?.name || issue.department?.name || "Unassigned";
@@ -301,15 +368,85 @@ export default function AdminReportsPage() {
               return now - createdAt <= dateRangeMs;
             })();
 
-      return statusMatch && departmentMatch && categoryMatch && dateMatch;
+      const queryMatch =
+        !normalizedQuery ||
+        [issue.title, issue.category, issue.student?.name, issue.student?.email, issueDepartment]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery);
+
+      return statusMatch && departmentMatch && categoryMatch && dateMatch && queryMatch;
     });
 
     return filtered.sort((a, b) => {
-      const aRank = getIssueStatusRank(a);
-      const bRank = getIssueStatusRank(b);
-      return statusSortDirection === "asc" ? aRank - bRank : bRank - aRank;
+      if (tableSort === "date_desc") {
+        return (new Date(b.createdAt || 0).getTime() || 0) - (new Date(a.createdAt || 0).getTime() || 0);
+      }
+
+      if (tableSort === "date_asc") {
+        return (new Date(a.createdAt || 0).getTime() || 0) - (new Date(b.createdAt || 0).getTime() || 0);
+      }
+
+      if (tableSort === "status") {
+        return getIssueStatusRank(a) - getIssueStatusRank(b);
+      }
+
+      if (tableSort === "department") {
+        const aDepartment = a.serviceDepartment?.name || a.academicDepartment?.name || a.department?.name || "Unassigned";
+        const bDepartment = b.serviceDepartment?.name || b.academicDepartment?.name || b.department?.name || "Unassigned";
+        return aDepartment.localeCompare(bDepartment);
+      }
+
+      const priorityRank: Record<string, number> = { Low: 1, Medium: 2, High: 3, Urgent: 4 };
+      const aRank = priorityRank[a.priority || "Medium"] || 0;
+      const bRank = priorityRank[b.priority || "Medium"] || 0;
+      return bRank - aRank;
     });
-  }, [issues, statusFilter, departmentFilter, categoryFilter, dateRangeFilter, statusSortDirection]);
+  }, [statusFilter, departmentFilter, categoryFilter, dateRangeFilter, tableSearch, tableSort, issues]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredTableIssues.length / pageSize));
+  }, [filteredTableIssues.length, pageSize]);
+
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedTableIssues = useMemo(() => {
+    const start = (effectiveCurrentPage - 1) * pageSize;
+    return filteredTableIssues.slice(start, start + pageSize);
+  }, [filteredTableIssues, effectiveCurrentPage, pageSize]);
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ key: "status" | "department" | "category" | "dateRange" | "search"; label: string }> = [];
+    if (statusFilter !== "All") chips.push({ key: "status", label: `Status: ${statusFilter}` });
+    if (departmentFilter !== "All") chips.push({ key: "department", label: `Department: ${departmentFilter}` });
+    if (categoryFilter !== "All") chips.push({ key: "category", label: `Category: ${categoryFilter}` });
+    if (dateRangeFilter !== "All") chips.push({ key: "dateRange", label: `Date: ${dateRangeFilter}` });
+    if (tableSearch.trim()) chips.push({ key: "search", label: `Search: ${tableSearch.trim()}` });
+    return chips;
+  }, [categoryFilter, dateRangeFilter, departmentFilter, statusFilter, tableSearch]);
+
+  const clearFilterChip = (key: "status" | "department" | "category" | "dateRange" | "search") => {
+    if (key === "status") setStatusFilter("All");
+    if (key === "department") setDepartmentFilter("All");
+    if (key === "category") setCategoryFilter("All");
+    if (key === "dateRange") setDateRangeFilter("All");
+    if (key === "search") setTableSearch("");
+    setCurrentPage(1);
+  };
+
+  const resetAllFilters = () => {
+    const now = new Date();
+    setStartDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
+    setEndDate(new Date().toISOString().slice(0, 10));
+    setStatusFilter("All");
+    setDepartmentFilter("All");
+    setCategoryFilter("All");
+    setDateRangeFilter("All");
+    setTableSearch("");
+    setTableSort("date_desc");
+    setCurrentPage(1);
+  };
 
   return (
     <AdminProtected>
@@ -321,7 +458,44 @@ export default function AdminReportsPage() {
             <>
               {error && <div className="text-sm text-red-600">{error}</div>}
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:scale-[1.01] hover:shadow-md">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-teal-500" />
+                  <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-teal-500" />
+                  <select value={departmentFilter} onChange={(event) => {
+                    setDepartmentFilter(event.target.value);
+                    setCurrentPage(1);
+                  }} className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-teal-500">
+                    <option value="All">All Departments</option>
+                    {departmentOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={resetAllFilters} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</button>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {activeFilterChips.length > 0 ? (
+                    <>
+                      <span className="text-xs font-semibold text-slate-500">Filters applied:</span>
+                      {activeFilterChips.map((chip) => (
+                        <button
+                          key={chip.key}
+                          type="button"
+                          onClick={() => clearFilterChip(chip.key)}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          {chip.label} ×
+                        </button>
+                      ))}
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-500">No filters applied</span>
+                  )}
+                </div>
+              </section>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <SummaryCard
                   label="Total Reports"
                   value={statsNumber(summary.total)}
@@ -336,7 +510,6 @@ export default function AdminReportsPage() {
                   Icon={Clock3}
                   trend={trendIndicators.pending}
                 />
-                <SummaryCard label="In Progress" value={statsNumber(summary.inProgress)} tone="purple" Icon={LoaderCircle} />
                 <SummaryCard
                   label="Resolved"
                   value={statsNumber(summary.resolved)}
@@ -344,12 +517,40 @@ export default function AdminReportsPage() {
                   Icon={CheckCircle2}
                   trend={trendIndicators.resolved}
                 />
-                <SummaryCard label="Assigned" value={statsNumber(summary.assigned)} tone="indigo" Icon={UserCheck} />
                 <SummaryCard label="Resolved Rate" value={`${summary.resolvedRate}%`} tone="green" Icon={Sparkles} />
               </div>
 
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <SummaryCard label="In Progress" value={statsNumber(summary.inProgress)} tone="purple" Icon={LoaderCircle} />
+                <SummaryCard label="Assigned" value={statsNumber(summary.assigned)} tone="indigo" Icon={UserCheck} />
+                <SummaryCard
+                  label="Avg Feedback"
+                  value={feedbackSummary.total > 0 ? `${feedbackSummary.averageRating.toFixed(1)} / 5` : "—"}
+                  tone="blue"
+                  Icon={Sparkles}
+                  subLabel={`${feedbackSummary.total} response${feedbackSummary.total === 1 ? "" : "s"}`}
+                />
+              </div>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h2 className="text-base font-semibold text-slate-900">Recurring Issue Insights</h2>
+                <p className="mt-1 text-sm text-slate-600">{recurringInsights.recurringCount} recurring issue{recurringInsights.recurringCount === 1 ? "" : "s"} detected</p>
+                {recurringInsights.topRecurringCategories.length > 0 ? (
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {recurringInsights.topRecurringCategories.map((item) => (
+                      <div key={item.category} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-sm font-medium text-slate-800">{item.category}</p>
+                        <p className="text-xs text-slate-500">{item.count} recurring report{item.count === 1 ? "" : "s"}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-500">No recurring patterns yet.</p>
+                )}
+              </section>
+
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-                <ChartCard title="Issues Distribution">
+                <ChartCard title="Issues by Status" className="h-full">
                   <div className="relative h-72 w-full">
                     {summary.total === 0 ? (
                       <EmptyChartMessage message="No data available yet" />
@@ -363,6 +564,14 @@ export default function AdminReportsPage() {
                             innerRadius={62}
                             outerRadius={92}
                             paddingAngle={3}
+                            onClick={(entry) => {
+                              if (!entry || typeof entry !== "object") return;
+                              const label = String((entry as { name?: string }).name || "");
+                              if (label === "Pending" || label === "In Progress" || label === "Resolved" || label === "Rejected") {
+                                setStatusFilter(label as "Pending" | "In Progress" | "Resolved" | "Rejected");
+                                setCurrentPage(1);
+                              }
+                            }}
                             label={({ name, payload }) => (payload?.value > 0 ? `${name} ${payload.value}` : "")}
                             labelLine
                           >
@@ -371,6 +580,7 @@ export default function AdminReportsPage() {
                             ))}
                           </Pie>
                           <Tooltip formatter={(_, name, item) => [item?.payload?.value ?? 0, name]} />
+                          <Legend verticalAlign="bottom" height={24} />
                         </PieChart>
                       </ResponsiveContainer>
                     )}
@@ -384,9 +594,16 @@ export default function AdminReportsPage() {
                       </div>
                     )}
                   </div>
+                  <div className="mt-3 grid grid-cols-1 gap-1 text-sm text-slate-600">
+                    {statusDonutData.map((entry) => (
+                      <p key={entry.name}>
+                        <span style={{ color: entry.color }}>●</span> {entry.name} - {entry.value}
+                      </p>
+                    ))}
+                  </div>
                 </ChartCard>
 
-                <ChartCard title="Issues by Department">
+                <ChartCard title="Issues by Department" className="h-full">
                   <div className={`${departmentChartData.length === 0 ? "h-40" : "h-72"} w-full`}>
                     {departmentChartData.length === 0 ? (
                       <EmptyChartMessage message="No department data available yet" />
@@ -401,7 +618,18 @@ export default function AdminReportsPage() {
                           <XAxis type="number" allowDecimals={false} />
                           <YAxis type="category" dataKey="department" width={130} />
                           <Tooltip formatter={(value) => [value, "Issues"]} />
-                          <Bar dataKey="count" fill="#0D9488" radius={[4, 4, 4, 4]}>
+                          <Bar
+                            dataKey="count"
+                            fill="#0D9488"
+                            radius={[4, 4, 4, 4]}
+                            onClick={(entry) => {
+                              const department = String((entry as { department?: string })?.department || "");
+                              if (department) {
+                                setDepartmentFilter(department);
+                                setCurrentPage(1);
+                              }
+                            }}
+                          >
                             <LabelList dataKey="count" position="right" fill="#334155" fontSize={12} />
                           </Bar>
                         </BarChart>
@@ -409,58 +637,110 @@ export default function AdminReportsPage() {
                     )}
                   </div>
                 </ChartCard>
-              </div>
 
-              <ChartCard title="Issue Activity Trend">
-                <div className={`${activityTrendData.every((point) => point.created === 0 && point.resolved === 0) ? "h-40" : "h-80"} w-full`}>
+                <ChartCard title="Issue Activity Trend" className="h-full">
+                <div className={`${activityTrendData.every((point) => point.created === 0 && point.resolved === 0) ? "h-40" : "h-72"} w-full`}>
                   {activityTrendData.every((point) => point.created === 0 && point.resolved === 0) ? (
                     <EmptyChartMessage message="No data available yet" />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={activityTrendData} margin={{ top: 10, right: 16, left: 2, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
+                        <XAxis
+                          dataKey="dateTs"
+                          type="number"
+                          domain={["dataMin", "dataMax"]}
+                          padding={{ left: 20, right: 20 }}
+                          tickFormatter={(value) => {
+                            const date = new Date(Number(value));
+                            if (Number.isNaN(date.getTime())) return "";
+                            return `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1).toString().padStart(2, "0")}`;
+                          }}
+                        />
                         <YAxis allowDecimals={false} />
                         <Tooltip />
+                        <Line
+                          type="monotone"
+                          dataKey="created"
+                          name="Created Issues"
+                          stroke="#0D9488"
+                          strokeWidth={3}
+                          dot={(props) => {
+                            const isLatest = props.index === activityTrendData.length - 1;
+                            return (
+                              <circle
+                                cx={props.cx}
+                                cy={props.cy}
+                                r={isLatest ? 7 : 4}
+                                fill={isLatest ? "#0F766E" : "#0D9488"}
+                                stroke="#ffffff"
+                                strokeWidth={2}
+                              />
+                            );
+                          }}
+                          activeDot={{
+                            r: 6,
+                            onClick: (event) => {
+                              const payload = (event as { payload?: { date?: string } })?.payload;
+                              if (!payload?.date) return;
+                              setStartDate(payload.date);
+                              setEndDate(payload.date);
+                            },
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="resolved"
+                          name="Resolved Issues"
+                          stroke="#16A34A"
+                          strokeWidth={3}
+                          dot={(props) => {
+                            const isLatest = props.index === activityTrendData.length - 1;
+                            return (
+                              <circle
+                                cx={props.cx}
+                                cy={props.cy}
+                                r={isLatest ? 7 : 4}
+                                fill={isLatest ? "#15803D" : "#16A34A"}
+                                stroke="#ffffff"
+                                strokeWidth={2}
+                              />
+                            );
+                          }}
+                        />
                         <Legend />
-                        <Line type="monotone" dataKey="created" name="Created Issues" stroke="#0D9488" strokeWidth={3} dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="resolved" name="Resolved Issues" stroke="#16A34A" strokeWidth={3} dot={{ r: 3 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
                 </div>
+                {activityTrendData.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-medium text-slate-600">
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-teal-600" />Created Issues</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-600" />Resolved Issues</span>
+                    <span className="text-slate-500">Tip: click a point to filter the report date.</span>
+                  </div>
+                ) : null}
                 {summary.resolved === 0 && <p className="text-xs font-medium text-slate-500">No issues resolved yet</p>}
               </ChartCard>
 
-              <ChartCard title="Issues by Category">
-                <div className={`${categoryPieData.length === 0 ? "h-40" : "w-full"} w-full`}>
-                  {categoryPieData.length === 0 ? (
-                    <EmptyChartMessage message="No category insights available yet" />
-                  ) : (
-                    <>
-                      <div className="h-64 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={categoryPieData} dataKey="value" nameKey="name" outerRadius={112}>
-                              {categoryPieData.map((entry) => (
-                                <Cell key={entry.name} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="mt-2 grid grid-cols-1 gap-1 text-sm text-slate-600 sm:grid-cols-2">
-                        {categoryPieData.map((entry) => (
-                          <p key={entry.name} className="truncate">
-                            <span className="font-medium text-slate-700">{entry.name}</span> – {entry.value}
-                          </p>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </ChartCard>
+                <ChartCard title="Insights" className="h-full">
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-sm text-slate-700">
+                        Most issues are pending (<span className="font-semibold">{dashboardInsights.pendingPercent}%</span>).
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-sm text-slate-700">{dashboardInsights.topDepartmentText}.</p>
+                    </div>
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                      <p className="text-sm font-medium text-emerald-800">
+                        Created vs Resolved trend helps track whether backlog is improving or growing.
+                      </p>
+                    </div>
+                  </div>
+                </ChartCard>
+              </div>
 
               <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-200 px-5 py-4">
@@ -473,34 +753,60 @@ export default function AdminReportsPage() {
                     Quick Filters
                   </div>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold text-slate-500">Search</span>
+                      <input
+                        ref={tableSearchRef}
+                        value={tableSearch}
+                        onChange={(event) => {
+                          setTableSearch(event.target.value);
+                          setCurrentPage(1);
+                        }}
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-teal-500"
+                        placeholder="Search reports..."
+                      />
+                    </label>
                     <FilterSelect
                       label="Status"
                       value={statusFilter}
-                      onChange={(value) => setStatusFilter(value as "All" | IssueStatus | "Assigned")}
+                      onChange={(value) => {
+                        setStatusFilter(value as "All" | IssueStatus | "Assigned");
+                        setCurrentPage(1);
+                      }}
                       options={[
                         { label: "All", value: "All" },
                         { label: "Pending", value: "Pending" },
                         { label: "Assigned", value: "Assigned" },
                         { label: "In Progress", value: "In Progress" },
                         { label: "Resolved", value: "Resolved" },
+                        { label: "Rejected", value: "Rejected" },
                       ]}
                     />
                     <FilterSelect
                       label="Department"
                       value={departmentFilter}
-                      onChange={setDepartmentFilter}
+                      onChange={(value) => {
+                        setDepartmentFilter(value);
+                        setCurrentPage(1);
+                      }}
                       options={[{ label: "All", value: "All" }, ...departmentOptions.map((name) => ({ label: name, value: name }))]}
                     />
                     <FilterSelect
                       label="Category"
                       value={categoryFilter}
-                      onChange={setCategoryFilter}
+                      onChange={(value) => {
+                        setCategoryFilter(value);
+                        setCurrentPage(1);
+                      }}
                       options={[{ label: "All", value: "All" }, ...categoryOptions.map((name) => ({ label: name, value: name }))]}
                     />
                     <FilterSelect
                       label="Date Range"
                       value={dateRangeFilter}
-                      onChange={(value) => setDateRangeFilter(value as DateRangeFilter)}
+                      onChange={(value) => {
+                        setDateRangeFilter(value as DateRangeFilter);
+                        setCurrentPage(1);
+                      }}
                       options={[
                         { label: "All", value: "All" },
                         { label: "Last 7 days", value: "7d" },
@@ -508,18 +814,27 @@ export default function AdminReportsPage() {
                         { label: "Last 90 days", value: "90d" },
                       ]}
                     />
+                    <FilterSelect
+                      label="Sort"
+                      value={tableSort}
+                      onChange={(value) => {
+                        setTableSort(value as TableSort);
+                        setCurrentPage(1);
+                      }}
+                      options={[
+                        { label: "Newest First", value: "date_desc" },
+                        { label: "Oldest First", value: "date_asc" },
+                        { label: "Status", value: "status" },
+                        { label: "Department", value: "department" },
+                        { label: "Priority", value: "priority" },
+                      ]}
+                    />
                   </div>
                   <div className="mt-3 flex justify-end">
                     <button
                       type="button"
                       className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                      onClick={() => {
-                        setStatusFilter("All");
-                        setDepartmentFilter("All");
-                        setCategoryFilter("All");
-                        setDateRangeFilter("All");
-                        setStatusSortDirection("asc");
-                      }}
+                      onClick={resetAllFilters}
                     >
                       <RefreshCcw size={14} />
                       Reset Filters
@@ -534,30 +849,19 @@ export default function AdminReportsPage() {
                       <Th>Category</Th>
                       <Th>Department</Th>
                       <Th>Priority</Th>
-                      <Th>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-900"
-                          onClick={() => setStatusSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-                        >
-                          Status
-                          <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-slate-200 text-slate-800">
-                            {statusSortDirection === "asc" ? <ArrowUp size={15} /> : <ArrowDown size={15} />}
-                          </span>
-                        </button>
-                      </Th>
+                      <Th>Status</Th>
                       <Th>Reported By</Th>
                       <Th>Date</Th>
                       <Th>Actions</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredTableIssues.map((issue) => {
+                    {paginatedTableIssues.map((issue) => {
                       const departmentName =
                         issue.serviceDepartment?.name || issue.academicDepartment?.name || issue.department?.name || "Unassigned";
 
                       return (
-                        <tr key={issue._id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <tr key={issue._id} className="cursor-pointer border-t border-slate-100 transition hover:bg-gray-50">
                           <Td className="font-semibold text-slate-800">
                             <button
                               type="button"
@@ -566,6 +870,11 @@ export default function AdminReportsPage() {
                             >
                               {issue.title}
                             </button>
+                            {issue.recurring ? (
+                              <span className="mt-1 inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                                Recurring
+                              </span>
+                            ) : null}
                           </Td>
                           <Td>{issue.category}</Td>
                           <Td>{departmentName}</Td>
@@ -593,12 +902,54 @@ export default function AdminReportsPage() {
                     {filteredTableIssues.length === 0 && (
                       <tr>
                         <Td colSpan={8} className="py-10 text-center text-slate-500">
-                          No reports match current filters.
+                          {issues.length === 0 ? "No data available" : "No results found"}
                         </Td>
                       </tr>
                     )}
                   </tbody>
                 </table>
+
+                {!loading && (
+                  <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-slate-500">
+                      Showing {filteredTableIssues.length === 0 ? 0 : (effectiveCurrentPage - 1) * pageSize + 1}
+                      -{Math.min(effectiveCurrentPage * pageSize, filteredTableIssues.length)} of {filteredTableIssues.length} filtered reports ({issues.length} total)
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={String(pageSize)}
+                        onChange={(event) => {
+                          setPageSize(Number(event.target.value));
+                          setCurrentPage(1);
+                        }}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700"
+                      >
+                        <option value="10">10 / page</option>
+                        <option value="20">20 / page</option>
+                        <option value="50">50 / page</option>
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                        disabled={effectiveCurrentPage === 1}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-sm text-slate-600">Page {effectiveCurrentPage} of {totalPages}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                        disabled={effectiveCurrentPage >= totalPages}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -618,12 +969,14 @@ function SummaryCard({
   tone,
   Icon,
   trend,
+  subLabel,
 }: {
   label: string;
   value: string;
   tone: "blue" | "orange" | "purple" | "green" | "indigo";
   Icon: React.ComponentType<{ size?: number; className?: string }>;
   trend?: TrendMeta;
+  subLabel?: string;
 }) {
   const toneClass: Record<string, string> = {
     blue: "bg-blue-50 text-blue-700",
@@ -634,7 +987,7 @@ function SummaryCard({
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:scale-[1.01] hover:shadow-md">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-slate-500">{label}</p>
         <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${toneClass[tone]}`}>
@@ -642,7 +995,8 @@ function SummaryCard({
         </div>
       </div>
       <p className="mt-2 text-3xl font-semibold leading-none text-slate-900">{value}</p>
-      {trend && (
+      {subLabel ? <p className="mt-1 text-xs font-medium text-slate-500">{subLabel}</p> : null}
+      {trend && trend.label && (
         <div className={`mt-2 inline-flex items-center gap-1 text-xs font-semibold ${trend.textClass}`}>
           {trend.direction === "up" ? <ArrowUp size={12} /> : trend.direction === "down" ? <ArrowDown size={12} /> : <ArrowRight size={12} />}
           {trend.label}
@@ -652,9 +1006,9 @@ function SummaryCard({
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:scale-[1.01] hover:shadow-md ${className}`}>
       <h2 className="mb-3 text-lg font-semibold text-slate-900">{title}</h2>
       {children}
     </section>
@@ -695,19 +1049,23 @@ function FilterSelect({
 }
 
 function StatusBadge({ status, isAssigned }: { status: IssueStatus; isAssigned: boolean }) {
+  if (status === "Rejected") {
+    return <Badge label="Rejected" className="bg-red-100 text-red-700" />;
+  }
+
   if (status === "Resolved") {
     return <Badge label="Resolved" className="bg-green-100 text-green-700" />;
   }
 
   if (status === "In Progress") {
-    return <Badge label="In Progress" className="bg-purple-100 text-purple-700" />;
+    return <Badge label="In Progress" className="bg-blue-100 text-blue-700" />;
   }
 
   if (isAssigned) {
     return <Badge label="Assigned" className="bg-blue-100 text-blue-700" />;
   }
 
-  return <Badge label="Pending" className="bg-orange-100 text-orange-700" />;
+  return <Badge label="Pending" className="bg-amber-100 text-amber-700" />;
 }
 
 function PriorityBadge({ priority }: { priority: IssuePriority | null }) {
@@ -720,10 +1078,14 @@ function PriorityBadge({ priority }: { priority: IssuePriority | null }) {
   }
 
   if (priority === "Medium") {
-    return <Badge label="Medium" className="bg-yellow-100 text-yellow-700" />;
+    return <Badge label="Medium" className="bg-amber-100 text-amber-700" />;
   }
 
-  return <Badge label={priority} className="bg-rose-100 text-rose-700" />;
+  if (priority === "High") {
+    return <Badge label="High" className="bg-orange-100 text-orange-700" />;
+  }
+
+  return <Badge label={priority} className="bg-red-100 text-red-700" />;
 }
 
 function Badge({ label, className }: { label: string; className: string }) {
@@ -861,17 +1223,6 @@ function formatDate(value?: string) {
   });
 }
 
-const CATEGORY_COLORS = [
-  "#0D9488",
-  "#F59E0B",
-  "#7C3AED",
-  "#2563EB",
-  "#16A34A",
-  "#EF4444",
-  "#EC4899",
-  "#14B8A6",
-];
-
 type TrendMeta = {
   direction: "up" | "down" | "flat";
   label: string;
@@ -879,20 +1230,26 @@ type TrendMeta = {
 };
 
 function getTrendMeta(current: number, previous: number): TrendMeta {
+  const delta = current - previous;
+  if (current === 0 && previous === 0) {
+    return { direction: "flat", label: "", textClass: "text-slate-500" };
+  }
+
   if (current > previous) {
-    return { direction: "up", label: "vs last month", textClass: "text-emerald-600" };
+    return { direction: "up", label: `+${delta} vs last month`, textClass: "text-emerald-600" };
   }
 
   if (current < previous) {
-    return { direction: "down", label: "vs last month", textClass: "text-rose-600" };
+    return { direction: "down", label: `${delta} vs last month`, textClass: "text-rose-600" };
   }
 
-  return { direction: "flat", label: "vs last month", textClass: "text-slate-500" };
+  return { direction: "flat", label: "same as last month", textClass: "text-slate-500" };
 }
 
 function getIssueStatusRank(issue: Issue) {
   if (issue.status === "Pending" && !issue.assignedStaff?._id) return 1;
   if (issue.status === "Pending" && issue.assignedStaff?._id) return 2;
   if (issue.status === "In Progress") return 3;
-  return 4;
+  if (issue.status === "Resolved") return 4;
+  return 5;
 }

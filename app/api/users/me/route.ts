@@ -13,7 +13,10 @@ export async function GET(request: Request) {
       id: user._id,
       name: user.name,
       email: user.email,
+      avatarUrl: user.avatarUrl ?? null,
       role: user.role,
+      adminRole: user.adminRole ?? null,
+      emailNotificationsEnabled: user.emailNotificationsEnabled !== false,
       isDemoUser: Boolean(user.isDemoUser),
       department: user.department ?? null,
       academicDepartment: user.academicDepartment ?? null,
@@ -32,17 +35,25 @@ export async function PATCH(request: Request) {
   if (auth instanceof Response) return auth;
 
   try {
-    const { name, studentId, institute, course, mobileNumber } = await request.json();
+    const { name, avatarUrl, studentId, institute, course, mobileNumber, emailNotificationsEnabled } = await request.json();
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return NextResponse.json({ message: "Name is required." }, { status: 400 });
     }
 
+    if (typeof avatarUrl === "string" && avatarUrl.length > 1_500_000) {
+      return NextResponse.json({ message: "Avatar image is too large." }, { status: 400 });
+    }
+
     auth.user.name = name.trim();
+    auth.user.avatarUrl = typeof avatarUrl === "string" ? avatarUrl.trim() || null : auth.user.avatarUrl ?? null;
     auth.user.studentId = typeof studentId === "string" ? studentId.trim() || null : auth.user.studentId ?? null;
     auth.user.institute = typeof institute === "string" ? institute.trim() || null : auth.user.institute ?? null;
     auth.user.course = typeof course === "string" ? course.trim() || null : auth.user.course ?? null;
     auth.user.mobileNumber =
       typeof mobileNumber === "string" ? mobileNumber.trim() || null : auth.user.mobileNumber ?? null;
+    if (typeof emailNotificationsEnabled === "boolean") {
+      auth.user.emailNotificationsEnabled = emailNotificationsEnabled;
+    }
     await auth.user.save();
 
     return NextResponse.json({
@@ -51,7 +62,10 @@ export async function PATCH(request: Request) {
         id: auth.user._id,
         name: auth.user.name,
         email: auth.user.email,
+        avatarUrl: auth.user.avatarUrl ?? null,
         role: auth.user.role,
+        adminRole: auth.user.adminRole ?? null,
+        emailNotificationsEnabled: auth.user.emailNotificationsEnabled !== false,
         isDemoUser: Boolean(auth.user.isDemoUser),
         department: auth.user.department ?? null,
         academicDepartment: auth.user.academicDepartment ?? null,

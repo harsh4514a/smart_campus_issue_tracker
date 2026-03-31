@@ -18,6 +18,7 @@ export default function StudentProfilePage() {
   );
   const userEmail = auth?.user.email || "student@example.com";
   const userRole = auth?.user.role || "student";
+  const showStudentIdField = userRole !== "faculty";
   const userInitials = getInitials(displayName);
   const userRoleLabel = formatRoleLabel(userRole);
   const defaultStudentId = (auth?.user.studentId || getStudentIdFromEmail(userEmail)).toUpperCase();
@@ -74,9 +75,14 @@ export default function StudentProfilePage() {
       return;
     }
 
-    const trimmedName = fullName.trim();
+    const trimmedName = fullName.trim().replace(/\s+/g, " ");
     if (!trimmedName) {
       showToast({ message: "Full name cannot be empty.", variant: "error" });
+      return;
+    }
+
+    if (trimmedName.length < 2 || trimmedName.length > 80) {
+      showToast({ message: "Full name must be between 2 and 80 characters.", variant: "error" });
       return;
     }
 
@@ -86,19 +92,43 @@ export default function StudentProfilePage() {
     const trimmedInstitute = institute.trim();
     const trimmedCourse = course.trim().toUpperCase();
     const trimmedMobile = mobileNumber.trim();
+    const normalizedMobile = trimmedMobile.replace(/\s+/g, "");
+
+    if (trimmedInstitute.length > 120) {
+      showToast({ message: "Institute name is too long.", variant: "error" });
+      setSaving(false);
+      return;
+    }
+
+    if (normalizedMobile && !/^\+?[0-9]{10,15}$/.test(normalizedMobile)) {
+      showToast({ message: "Enter a valid mobile number (10 to 15 digits).", variant: "error" });
+      setSaving(false);
+      return;
+    }
+
+    const payload: {
+      name: string;
+      institute: string;
+      course: string;
+      mobileNumber: string;
+      studentId?: string;
+    } = {
+      name: trimmedName,
+      institute: trimmedInstitute,
+      course: trimmedCourse,
+      mobileNumber: normalizedMobile,
+    };
+
+    if (showStudentIdField) {
+      payload.studentId = trimmedStudentId;
+    }
 
     try {
       const response = await authFetch(
         "/api/users/me",
         {
           method: "PATCH",
-          body: JSON.stringify({
-            name: trimmedName,
-            studentId: trimmedStudentId,
-            institute: trimmedInstitute,
-            course: trimmedCourse,
-            mobileNumber: trimmedMobile,
-          }),
+          body: JSON.stringify(payload),
         },
         auth.token
       );
@@ -107,7 +137,7 @@ export default function StudentProfilePage() {
       const updatedStudentId = response?.user?.studentId ?? trimmedStudentId;
       const updatedInstitute = response?.user?.institute ?? trimmedInstitute;
       const updatedCourse = response?.user?.course ?? trimmedCourse;
-      const updatedMobile = response?.user?.mobileNumber ?? trimmedMobile;
+      const updatedMobile = response?.user?.mobileNumber ?? normalizedMobile;
       setDisplayName(updatedName);
       setFullName(updatedName);
       setStudentId((updatedStudentId || trimmedStudentId).toUpperCase());
@@ -215,15 +245,17 @@ export default function StudentProfilePage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">Student ID</label>
-                    <input
-                      type="text"
-                      value={studentId}
-                      disabled
-                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500"
-                    />
-                  </div>
+                  {showStudentIdField ? (
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">Student ID</label>
+                      <input
+                        type="text"
+                        value={studentId}
+                        disabled
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500"
+                      />
+                    </div>
+                  ) : null}
 
                   <div>
                     <label className="text-sm font-medium text-slate-700">Institute</label>

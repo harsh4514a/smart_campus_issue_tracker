@@ -12,7 +12,7 @@ export default function Home() {
   useEffect(() => {
     const auth = loadAuth();
     if (auth?.user?.role) {
-      router.replace(getRedirectPath(auth.user.role));
+      router.replace(getRedirectPath(auth.user.role, auth.user.adminRole));
     }
   }, [router]);
 
@@ -47,11 +47,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Why CampusTrack Section */}
+      {/* Why CampusTracker Section */}
       <section className="bg-white/5 backdrop-blur-sm border-t border-emerald-700/30 py-24">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">Why CampusTrack?</h2>
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">Why CampusTracker?</h2>
             <p className="text-lg text-emerald-100/80 max-w-3xl mx-auto">
               Streamline campus maintenance and support with our comprehensive issue tracking system.
             </p>
@@ -132,7 +132,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="py-12 text-center text-emerald-200/60 border-t border-emerald-800/40 bg-emerald-950/40">
-        <p>© {new Date().getFullYear()} CampusTrack. Smart Campus Issue Tracker.</p>
+        <p>© {new Date().getFullYear()} CampusTracker. Smart Campus Issue Tracker.</p>
       </footer>
     </div>
   );
@@ -166,7 +166,7 @@ export default function Home() {
 //         <div className="max-w-7xl mx-auto px-6 py-6 flex items-center justify-between">
 //           <div className="flex items-center gap-2 font-semibold">
 //             <span className="h-8 w-8 flex items-center justify-center rounded bg-white/10">🏫</span>
-//             CampusTrack
+//             CampusTracker
 //           </div>
 //           <div className="flex items-center gap-4">
 //             <Link href="/login" className="text-sm text-white/80 hover:text-white">
@@ -210,7 +210,7 @@ export default function Home() {
 //       {/* ================= FEATURES ================= */}
 //       <section className="bg-white py-20">
 //         <div className="max-w-7xl mx-auto px-6 text-center">
-//           <h2 className="text-2xl font-semibold">Why CampusTrack?</h2>
+//           <h2 className="text-2xl font-semibold">Why CampusTracker?</h2>
 //           <p className="mt-2 text-gray-500">
 //             Streamline campus maintenance and support with our issue tracking system.
 //           </p>
@@ -291,7 +291,7 @@ export default function Home() {
 
 //       {/* ================= FOOTER ================= */}
 //       <footer className="bg-gray-50 py-6 text-center text-sm text-gray-500">
-//         © 2025 CampusTrack. Smart Campus Issue Tracker.
+//         © 2025 CampusTracker. Smart Campus Issue Tracker.
 //       </footer>
 //     </div>
 //   );

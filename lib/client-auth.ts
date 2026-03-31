@@ -8,7 +8,10 @@ export interface StoredAuth {
     id: string;
     name: string;
     email: string;
+    avatarUrl?: string | null;
     role: UserRole;
+    adminRole?: "super_admin" | "dept_admin" | "worker" | null;
+    emailNotificationsEnabled?: boolean;
     isDemoUser?: boolean;
     department?: { _id?: string; name?: string } | null;
     academicDepartment?: { _id?: string; name?: string } | null;
@@ -19,6 +22,8 @@ export interface StoredAuth {
     mobileNumber?: string | null;
   };
 }
+
+export type AdminRole = "super_admin" | "dept_admin" | "worker";
 
 const STORAGE_KEY = "scit_auth";
 type AuthStorage = "local" | "session";
@@ -104,8 +109,12 @@ export function clearAuth() {
   sessionStorage.removeItem("isAdmin");
 }
 
-export function getRedirectPath(role: UserRole) {
-  if (role === "admin") return "/admin/dashboard";
+export function getRedirectPath(role: UserRole, adminRole?: AdminRole | null) {
+  if (role === "admin") {
+    if (adminRole === "super_admin") return "/admin/dashboard";
+    if (adminRole === "dept_admin") return "/dept-admin/dashboard";
+    return "/admin/issues";
+  }
   if (role === "staff") return "/staff/dashboard";
   return "/student/dashboard";
 }

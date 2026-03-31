@@ -25,8 +25,13 @@ if (!cached) {
 }
 
 export async function connectDB() {
-  if (cached?.conn) {
+  if (cached?.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
+  }
+
+  // If connection dropped, force a fresh connect attempt.
+  if (mongoose.connection.readyState === 0) {
+    cached!.conn = null;
   }
 
   if (!cached?.promise) {
@@ -42,11 +47,22 @@ export async function connectDB() {
     cached!.promise = mongoose.connect(uri, {
       bufferCommands: false,
       dbName: process.env.MONGODB_DB_NAME,
+      connectTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 12000,
+      socketTimeoutMS: 20000,
+      family: 4,
     });
   }
 
-  cached!.conn = await cached!.promise;
-  return cached!.conn;
+  try {
+    cached!.conn = await cached!.promise;
+    return cached!.conn;
+  } catch (error) {
+    // Important: allow subsequent requests to retry a new connection attempt.
+    cached!.promise = null;
+    cached!.conn = null;
+    throw error;
+  }
 }
 
 export default connectDB;

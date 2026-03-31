@@ -4,6 +4,7 @@ import { authenticateRequest } from "@/lib/auth";
 import Issue from "@/models/Issue";
 import Department from "@/models/Department";
 import { buildLocationKey, normalizeTitle, wordSetSimilarity } from "@/lib/duplicate-check";
+import { canAdminAccessIssue } from "@/lib/rbac";
 
 const SIMILARITY_THRESHOLD = 0.75;
 
@@ -54,9 +55,11 @@ export async function PATCH(request: Request, { params }: Params) {
 
   try {
     const { title, description, category, location, imageUrl } = await request.json();
-    if (!title || !description || !category || !location) {
-      return NextResponse.json({ message: "All fields are required." }, { status: 400 });
+    if (!title || !category || !location) {
+      return NextResponse.json({ message: "Title, category, and location are required." }, { status: 400 });
     }
+
+    const normalizedDescription = typeof description === "string" ? description.trim() : "";
 
     const normalizedTitle = normalizeTitle(title);
     const locationKey = buildLocationKey(location);
@@ -92,7 +95,7 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     issue.title = title;
-    issue.description = description;
+    issue.description = normalizedDescription;
     issue.category = category;
     issue.location = location;
     issue.normalizedTitle = normalizedTitle;
@@ -155,6 +158,10 @@ export async function DELETE(request: Request, { params }: Params) {
     const isOwner = issue.student.toString() === auth.user._id.toString();
 
     if (!isAdmin && !isOwner) {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
+
+    if (isAdmin && !canAdminAccessIssue(auth.user, issue)) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 

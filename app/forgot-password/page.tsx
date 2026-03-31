@@ -128,7 +128,7 @@ export default function ForgotPasswordPage() {
 
       saveAuth({ token, user });
       showToast({ message: "Password reset successful", variant: "success" });
-      router.replace(getRedirectPath(user.role));
+      router.replace(getRedirectPath(user.role, user.adminRole));
     } catch (err) {
       showToast({ message: err instanceof Error ? err.message : "Reset failed", variant: "error" });
     } finally {
@@ -277,7 +277,7 @@ export default function ForgotPasswordPage() {
 
       <footer className="border-t border-emerald-800/40 bg-emerald-950/60 backdrop-blur-md py-6 text-center text-emerald-300/80 text-sm">
         <div className="max-w-7xl mx-auto px-6">
-          <p>© {new Date().getFullYear()} CampusTrack. Smart Campus Issue Tracker.</p>
+          <p>© {new Date().getFullYear()} CampusTracker. Smart Campus Issue Tracker.</p>
         </div>
       </footer>
     </div>

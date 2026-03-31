@@ -3,9 +3,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { ClipboardList, LayoutDashboard, ListChecks, PlusCircle } from "lucide-react";
+import { ClipboardList, LayoutDashboard, ListChecks, Menu, PlusCircle, X } from "lucide-react";
 
 export const studentNavItems = [
   { label: "Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
@@ -30,6 +31,7 @@ export function StudentSidebar({
   footerSlot,
 }: StudentSidebarProps) {
   const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     studentNavItems.forEach((item) => {
@@ -38,13 +40,71 @@ export function StudentSidebar({
   }, [router]);
 
   return (
-  <aside className="hidden w-64 bg-emerald-900 text-white lg:flex flex-col sticky top-0 h-screen overflow-hidden">
+    <>
+      <button
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        className="fixed left-4 top-4 z-40 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm lg:hidden"
+        aria-label="Open student menu"
+      >
+        <Menu size={18} />
+      </button>
+
+      {mobileOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-72 flex-col bg-emerald-900 text-white shadow-2xl">
+            <div className="flex items-center justify-end border-b border-emerald-800 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/80 hover:bg-white/10"
+                aria-label="Close student menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <SidebarContent
+              pathname={pathname}
+              initials={initials}
+              userName={userName}
+              roleLabel={roleLabel}
+              footerSlot={footerSlot}
+              onNavigate={() => setMobileOpen(false)}
+            />
+          </aside>
+        </div>
+      ) : null}
+
+      <aside className="hidden w-64 bg-emerald-900 text-white lg:flex flex-col sticky top-0 h-screen overflow-hidden">
+        <SidebarContent
+          pathname={pathname}
+          initials={initials}
+          userName={userName}
+          roleLabel={roleLabel}
+          footerSlot={footerSlot}
+        />
+      </aside>
+    </>
+  );
+}
+
+function SidebarContent({
+  pathname,
+  initials,
+  userName,
+  roleLabel,
+  footerSlot,
+  onNavigate,
+}: StudentSidebarProps & { onNavigate?: () => void }) {
+  return (
+    <>
       <div className="px-6 py-6 border-b border-emerald-800">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl">
             <Image
               src="/images/logo1.png?v=2"
-              alt="CampusTrack logo"
+              alt="CampusTracker logo"
               width={54}
               height={54}
               className="h-full w-full object-contain "
@@ -54,8 +114,8 @@ export function StudentSidebar({
             />
           </div>
           <div>
-            <p className="text-lg font-semibold">CampusTrack</p>
-            <p className="text-sm text-white/60">Smart Campus Issue Tracker</p>
+            <p className="text-lg font-semibold">Student Hub</p>
+            <p className="text-sm text-white/60">CampusTracker</p>
           </div>
         </div>
       </div>
@@ -65,6 +125,7 @@ export function StudentSidebar({
           <Link
             key={item.href}
             href={item.href}
+            onClick={onNavigate}
             className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
               pathname === item.href
                 ? "bg-white text-emerald-900"
@@ -97,6 +158,6 @@ export function StudentSidebar({
           </div>
         )}
       </div>
-    </aside>
+    </>
   );
 }

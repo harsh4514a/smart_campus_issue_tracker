@@ -1,10 +1,11 @@
 import jwt from "jsonwebtoken";
-import User, { IUser, UserRole } from "@/models/User";
+import User, { IUser, UserRole, AdminRole } from "@/models/User";
 import connectDB from "@/lib/db";
 
 export interface AuthTokenPayload {
   userId: string;
   role: UserRole;
+  adminRole?: AdminRole | null;
   departmentId?: string | null;
 }
 
@@ -20,7 +21,7 @@ const DEMO_EMAILS = new Set(
   [
     process.env.DEMO_STUDENT_EMAIL || "demo.student@charusat.edu.in",
     process.env.DEMO_STAFF_EMAIL || "demo.worker@charusat.ac.in",
-    process.env.DEMO_ADMIN_EMAIL || "demo.admin@campustracker.com",
+    process.env.DEMO_ADMIN_EMAIL || "demo.admin@CampusTrackerer.com",
   ].map((email) => email.trim().toLowerCase())
 );
 

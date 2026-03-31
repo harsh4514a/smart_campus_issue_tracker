@@ -5,8 +5,16 @@ import "@/models/Department";
 import { signToken } from "@/lib/auth";
 import { DEMO_CREDENTIALS, ensureDemoUsers } from "@/lib/demo-users";
 
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "admin@campustracker.com").trim().toLowerCase();
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "harshpatel1753@gmail.com").trim().toLowerCase();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+
+function resolveNonPrimaryAdminRole(role: unknown): "super_admin" | "dept_admin" | "worker" {
+  if (role === "super_admin" || role === "dept_admin" || role === "worker") {
+    return role;
+  }
+  // Never escalate unknown admin roles to super_admin.
+  return "worker";
+}
 
 export async function POST(request: Request) {
   try {
@@ -24,10 +32,6 @@ export async function POST(request: Request) {
     const isDemoAdminLogin =
       normalizedEmail === DEMO_CREDENTIALS.admin.email && String(password) === DEMO_CREDENTIALS.admin.password;
 
-    if (!isMainAdminLogin && !isDemoAdminLogin) {
-      return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
-    }
-
     if (isDemoAdminLogin) {
       const demoAdminUser = await User.findOne({ email: DEMO_CREDENTIALS.admin.email })
         .populate("department")
@@ -38,9 +42,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
       }
 
+      if (demoAdminUser.isActive === false) {
+        return NextResponse.json({ message: "Account is inactive. Please contact super admin." }, { status: 403 });
+      }
+
       const token = signToken({
         userId: demoAdminUser._id.toString(),
         role: "admin",
+        adminRole: demoAdminUser.adminRole ?? "super_admin",
         departmentId: null,
       });
 
@@ -52,12 +61,65 @@ export async function POST(request: Request) {
           name: demoAdminUser.name,
           email: demoAdminUser.email,
           role: demoAdminUser.role,
+          adminRole: demoAdminUser.adminRole ?? "super_admin",
+          emailNotificationsEnabled: demoAdminUser.emailNotificationsEnabled !== false,
           isDemoUser: Boolean(demoAdminUser.isDemoUser),
           department: demoAdminUser.department,
           studentId: demoAdminUser.studentId ?? null,
           institute: demoAdminUser.institute ?? null,
           course: demoAdminUser.course ?? null,
           mobileNumber: demoAdminUser.mobileNumber ?? null,
+        },
+      });
+    }
+
+    // Allow any persisted admin user (including dept_admin/worker) to log in.
+    if (!isMainAdminLogin) {
+      const adminUser = await User.findOne({ email: normalizedEmail, role: "admin" })
+        .populate("department")
+        .populate("academicDepartment")
+        .populate("serviceDepartment");
+
+      if (!adminUser) {
+        return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
+      }
+
+      if (adminUser.isActive === false) {
+        return NextResponse.json({ message: "Account is inactive. Please contact super admin." }, { status: 403 });
+      }
+
+      const isMatch = await adminUser.comparePassword(String(password));
+      if (!isMatch) {
+        return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
+      }
+
+      const resolvedAdminRole = resolveNonPrimaryAdminRole(adminUser.adminRole);
+
+      const token = signToken({
+        userId: adminUser._id.toString(),
+        role: "admin",
+        adminRole: resolvedAdminRole,
+        departmentId: adminUser.department ? String(adminUser.department) : null,
+      });
+
+      return NextResponse.json({
+        message: "Login successful",
+        token,
+        user: {
+          id: adminUser._id,
+          name: adminUser.name,
+          email: adminUser.email,
+          role: adminUser.role,
+          adminRole: resolvedAdminRole,
+          emailNotificationsEnabled: adminUser.emailNotificationsEnabled !== false,
+          isDemoUser: Boolean(adminUser.isDemoUser),
+          department: adminUser.department,
+          academicDepartment: adminUser.academicDepartment,
+          serviceDepartment: adminUser.serviceDepartment,
+          studentId: adminUser.studentId ?? null,
+          institute: adminUser.institute ?? null,
+          course: adminUser.course ?? null,
+          mobileNumber: adminUser.mobileNumber ?? null,
         },
       });
     }
@@ -70,15 +132,38 @@ export async function POST(request: Request) {
         email: ADMIN_EMAIL,
         password: ADMIN_PASSWORD,
         role: "admin",
+        adminRole: "super_admin",
+        emailNotificationsEnabled: true,
         department: null,
       });
       adminUser = await User.findById(adminUser._id).populate("department");
-    } else if (adminUser.role !== "admin") {
-      adminUser.role = "admin";
-      await adminUser.save();
-    } else if (adminUser.isDemoUser) {
-      adminUser.isDemoUser = false;
-      await adminUser.save();
+    } else {
+      let shouldSave = false;
+
+      if (adminUser.role !== "admin") {
+        adminUser.role = "admin";
+        shouldSave = true;
+      }
+
+      // Primary admin credentials must always map to super_admin.
+      if (adminUser.adminRole !== "super_admin") {
+        adminUser.adminRole = "super_admin";
+        shouldSave = true;
+      }
+
+      if (adminUser.department) {
+        adminUser.department = null;
+        shouldSave = true;
+      }
+
+      if (adminUser.isDemoUser) {
+        adminUser.isDemoUser = false;
+        shouldSave = true;
+      }
+
+      if (shouldSave) {
+        await adminUser.save();
+      }
     }
 
     if (!adminUser) {
@@ -88,6 +173,7 @@ export async function POST(request: Request) {
     const token = signToken({
       userId: adminUser._id.toString(),
       role: "admin",
+      adminRole: "super_admin",
       departmentId: null,
     });
 
@@ -99,6 +185,8 @@ export async function POST(request: Request) {
         name: adminUser.name,
         email: adminUser.email,
         role: adminUser.role,
+        adminRole: "super_admin",
+        emailNotificationsEnabled: adminUser.emailNotificationsEnabled !== false,
         isDemoUser: Boolean(adminUser.isDemoUser),
         department: adminUser.department,
         studentId: adminUser.studentId ?? null,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import { authenticateRequest } from "@/lib/auth";
 import Department from "@/models/Department";
+import { isSuperAdmin } from "@/lib/rbac";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -11,6 +12,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   await connectDB();
   const auth = await authenticateRequest(request, ["admin"]);
   if (auth instanceof Response) return auth;
+  if (!isSuperAdmin(auth.user)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const { id } = await context.params;
@@ -56,6 +60,9 @@ export async function DELETE(_request: Request, context: RouteContext) {
   await connectDB();
   const auth = await authenticateRequest(_request, ["admin"]);
   if (auth instanceof Response) return auth;
+  if (!isSuperAdmin(auth.user)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const { id } = await context.params;

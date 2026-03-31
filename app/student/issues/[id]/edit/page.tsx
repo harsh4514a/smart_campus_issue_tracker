@@ -10,7 +10,7 @@ import { StudentUserActions } from "@/app/student/components/StudentUserActions"
 import { authFetch, clearAuth, loadAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
 
-const categories = ["Maintenance", "Electrical", "Plumbing", "Cleanliness", "Security", "Other"];
+const categories = ["Cleaning", "Electrical", "IT Support", "Network / Internet", "Plumbing", "Furniture"];
 
 type IssueDetail = {
   _id: string;
@@ -19,6 +19,8 @@ type IssueDetail = {
   category: string;
   location: string;
   imageUrl?: string | null;
+  status?: string;
+  dueDate?: string;
 };
 
 export default function StudentIssueEditPage() {
@@ -46,6 +48,7 @@ export default function StudentIssueEditPage() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingIssue, setLoadingIssue] = useState(true);
+  const [currentIssue, setCurrentIssue] = useState<IssueDetail | null>(null);
 
   useEffect(() => {
     if (!auth || !issueId) return;
@@ -59,7 +62,9 @@ export default function StudentIssueEditPage() {
           return;
         }
 
-        const [building = "", room = "", area = ""] = issue.location.split(" · ");
+        setCurrentIssue(issue);
+
+        const { building, room, area } = parseIssueLocation(issue.location);
         setForm({
           category: issue.category,
           title: issue.title,
@@ -78,6 +83,24 @@ export default function StudentIssueEditPage() {
       })
       .finally(() => setLoadingIssue(false));
   }, [auth, issueId, showToast]);
+
+  const overdueText = useMemo(() => {
+    if (!currentIssue?.dueDate) return null;
+    if (currentIssue.status === "Resolved") return null;
+
+    const due = new Date(currentIssue.dueDate).getTime();
+    if (Number.isNaN(due) || Date.now() <= due) return null;
+
+    const overdueMs = Date.now() - due;
+    const dayMs = 24 * 60 * 60 * 1000;
+    if (overdueMs >= dayMs) {
+      const days = Math.floor(overdueMs / dayMs);
+      return `${days} day${days > 1 ? "s" : ""}`;
+    }
+
+    const hours = Math.max(1, Math.floor(overdueMs / (60 * 60 * 1000)));
+    return `${hours} hour${hours > 1 ? "s" : ""}`;
+  }, [currentIssue?.dueDate, currentIssue?.status]);
 
   const handleChange = (field: keyof typeof form) => (value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -150,6 +173,12 @@ export default function StudentIssueEditPage() {
           <main className="flex-1 overflow-y-auto p-6 scrollbar-hide">
             <div className="mx-auto max-w-3xl">
               <section className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm">
+                {overdueText ? (
+                  <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                    This issue is overdue by {overdueText}.
+                  </div>
+                ) : null}
+
                 {loadingIssue ? (
                   <div className="space-y-3 animate-pulse">
                     <div className="h-4 w-40 rounded bg-slate-200" />
@@ -194,12 +223,11 @@ export default function StudentIssueEditPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <FieldLabel htmlFor="description" label="Description" required description="Provide more details about the issue" />
+                        <FieldLabel htmlFor="description" label="Description" description="Provide more details about the issue" />
                         <textarea
                           id="description"
                           value={form.description}
                           onChange={(e) => handleChange("description")(e.target.value)}
-                          required
                           rows={4}
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                           placeholder="Provide more details about the issue..."
@@ -386,4 +414,41 @@ function getInitials(value: string) {
 function formatRoleLabel(role?: string) {
   if (!role) return "Student";
   return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function parseIssueLocation(location?: string) {
+  const normalized = String(location || "").trim();
+  if (!normalized || normalized.toLowerCase() === "not specified") {
+    return { building: "", room: "", area: "" };
+  }
+
+  const splitBy = (delimiter: string) =>
+    normalized
+      .split(delimiter)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const dotParts = splitBy(" · ");
+  if (dotParts.length >= 3) {
+    const [building, room, ...rest] = dotParts;
+    return { building, room, area: rest.join(" ") };
+  }
+
+  if (dotParts.length === 2) {
+    return { building: dotParts[0], room: dotParts[1], area: "" };
+  }
+
+  const pipeParts = splitBy("|");
+  if (pipeParts.length >= 2) {
+    const [building, room, ...rest] = pipeParts;
+    return { building, room, area: rest.join(" ") };
+  }
+
+  const commaParts = splitBy(",");
+  if (commaParts.length >= 2) {
+    const [building, room, ...rest] = commaParts;
+    return { building, room, area: rest.join(" ") };
+  }
+
+  return { building: normalized, room: "", area: "" };
 }

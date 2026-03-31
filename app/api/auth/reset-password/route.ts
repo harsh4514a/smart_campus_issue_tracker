@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
-import Otp from "@/models/Otp";
 import User from "@/models/User";
 import "@/models/Department";
 import { signToken } from "@/lib/auth";
+import { isOtpFormatValid, normalizeEmail, verifyOtpRecord } from "@/lib/otp-service";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 
@@ -17,35 +17,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Email and OTP are required." }, { status: 400 });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     if (!collegeEmailRegex.test(normalizedEmail)) {
       return NextResponse.json({ message: "Please use your college email." }, { status: 400 });
     }
 
-    const otpRecord = await Otp.findOne({ email: normalizedEmail, purpose: "reset" });
-    if (!otpRecord) {
-      return NextResponse.json({ message: "Reset code not found or expired." }, { status: 404 });
+    if (!isOtpFormatValid(otp)) {
+      return NextResponse.json({ message: "Reset code must be a 6-digit code." }, { status: 400 });
     }
 
-    if (otpRecord.expiresAt.getTime() < Date.now()) {
-      await otpRecord.deleteOne();
-      return NextResponse.json({ message: "Reset code expired." }, { status: 400 });
+    const verification = await verifyOtpRecord({
+      email: normalizedEmail,
+      otp,
+      purpose: "reset-password",
+    });
+
+    if (!verification.ok) {
+      const message = verification.status === 404 ? "Reset code not found or expired." : verification.message;
+      return NextResponse.json({ message }, { status: verification.status });
     }
 
-    if (otpRecord.otp !== otp) {
-      return NextResponse.json({ message: "Invalid reset code." }, { status: 401 });
-    }
+    const { otpRecord } = verification;
 
     const user = await User.findOne({ email: normalizedEmail }).populate("department");
     if (!user) {
-      await otpRecord.deleteOne();
       return NextResponse.json({ message: "User not found." }, { status: 404 });
     }
 
     user.password = otpRecord.passwordHash;
     await user.save();
-    await otpRecord.deleteOne();
 
     const token = signToken({
       userId: user._id.toString(),

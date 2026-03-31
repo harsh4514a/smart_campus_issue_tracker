@@ -2,16 +2,23 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 import bcrypt from "bcryptjs";
 
 export type UserRole = "student" | "faculty" | "staff" | "admin";
+export type AdminRole = "super_admin" | "dept_admin" | "worker";
 
 export interface IUser extends Document {
   name: string;
   email: string;
   password: string;
+  avatarUrl?: string | null;
   role: UserRole;
+  adminRole?: AdminRole | null;
+  designation?: string | null;
+  isActive?: boolean;
+  emailNotificationsEnabled?: boolean;
   isDemoUser?: boolean;
   department?: mongoose.Types.ObjectId | null;
   academicDepartment?: mongoose.Types.ObjectId | null;
   serviceDepartment?: mongoose.Types.ObjectId | null;
+  managedDepartments?: mongoose.Types.ObjectId[];
   studentId?: string | null;
   institute?: string | null;
   course?: string | null;
@@ -30,16 +37,26 @@ const UserSchema = new Schema<IUser>(
       trim: true,
     },
     password: { type: String, required: true, minlength: 6 },
+    avatarUrl: { type: String, trim: true, default: null },
     role: {
       type: String,
       enum: ["student", "faculty", "staff", "admin"],
       required: true,
       default: "student",
     },
+    adminRole: {
+      type: String,
+      enum: ["super_admin", "dept_admin", "worker"],
+      default: null,
+    },
+    designation: { type: String, trim: true, default: null },
+    isActive: { type: Boolean, default: true },
+    emailNotificationsEnabled: { type: Boolean, default: true },
     isDemoUser: { type: Boolean, default: false },
     department: { type: Schema.Types.ObjectId, ref: "Department", default: null },
     academicDepartment: { type: Schema.Types.ObjectId, ref: "Department", default: null },
     serviceDepartment: { type: Schema.Types.ObjectId, ref: "Department", default: null },
+    managedDepartments: [{ type: Schema.Types.ObjectId, ref: "Department" }],
     studentId: { type: String, trim: true, default: null },
     institute: { type: String, trim: true, default: null },
     course: { type: String, trim: true, default: null },
@@ -108,9 +125,49 @@ if (cachedUserModel && !cachedUserModel.schema.path("mobileNumber")) {
   });
 }
 
+if (cachedUserModel && !cachedUserModel.schema.path("avatarUrl")) {
+  cachedUserModel.schema.add({
+    avatarUrl: { type: String, trim: true, default: null },
+  });
+}
+
 if (cachedUserModel && !cachedUserModel.schema.path("isDemoUser")) {
   cachedUserModel.schema.add({
     isDemoUser: { type: Boolean, default: false },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("adminRole")) {
+  cachedUserModel.schema.add({
+    adminRole: {
+      type: String,
+      enum: ["super_admin", "dept_admin", "worker"],
+      default: null,
+    },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("designation")) {
+  cachedUserModel.schema.add({
+    designation: { type: String, trim: true, default: null },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("isActive")) {
+  cachedUserModel.schema.add({
+    isActive: { type: Boolean, default: true },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("managedDepartments")) {
+  cachedUserModel.schema.add({
+    managedDepartments: [{ type: Schema.Types.ObjectId, ref: "Department" }],
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("emailNotificationsEnabled")) {
+  cachedUserModel.schema.add({
+    emailNotificationsEnabled: { type: Boolean, default: true },
   });
 }
 

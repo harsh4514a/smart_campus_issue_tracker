@@ -38,6 +38,7 @@ export async function POST(request: Request) {
     const token = signToken({
       userId: user._id.toString(),
       role: user.role,
+      adminRole: user.adminRole ?? null,
       departmentId: user.department ? user.department.toString() : null,
     });
 
@@ -49,6 +50,8 @@ export async function POST(request: Request) {
         name: user.name,
         email: user.email,
         role: user.role,
+        adminRole: user.adminRole ?? null,
+        emailNotificationsEnabled: user.emailNotificationsEnabled !== false,
         isDemoUser: Boolean(user.isDemoUser),
         department: user.department,
         academicDepartment: user.academicDepartment,

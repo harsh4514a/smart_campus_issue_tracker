@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import User from "@/models/User";
-import Otp from "@/models/Otp";
+import type { OtpPurpose } from "@/models/Otp";
 import { signToken } from "@/lib/auth";
 import { deriveRoleFromEmail, deriveStudentMetadataFromEmail } from "@/lib/role-utils";
+import { isOtpFormatValid, normalizeEmail, verifyOtpRecord } from "@/lib/otp-service";
 
 const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
 
@@ -11,37 +12,42 @@ export async function POST(request: Request) {
   try {
     await connectDB();
 
-    const { email, otp } = await request.json();
+    const { email, otp, purpose } = await request.json();
 
     if (!email || !otp) {
       return NextResponse.json({ message: "Email and OTP are required." }, { status: 400 });
     }
 
-    if (!collegeEmailRegex.test(email)) {
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPurpose = (purpose ?? "register") as OtpPurpose;
+
+    if (!collegeEmailRegex.test(normalizedEmail)) {
       return NextResponse.json({ message: "Only college email is allowed." }, { status: 400 });
     }
 
-    const otpRecord = await Otp.findOne({
-      email,
-      $or: [{ purpose: "register" }, { purpose: { $exists: false } }],
+    if (normalizedPurpose !== "register") {
+      return NextResponse.json({ message: "Invalid OTP purpose for this endpoint." }, { status: 400 });
+    }
+
+    if (!isOtpFormatValid(otp)) {
+      return NextResponse.json({ message: "OTP must be a 6-digit code." }, { status: 400 });
+    }
+
+    const verification = await verifyOtpRecord({
+      email: normalizedEmail,
+      otp,
+      purpose: normalizedPurpose,
     });
-    if (!otpRecord) {
-      return NextResponse.json({ message: "OTP not found or expired." }, { status: 404 });
+
+    if (!verification.ok) {
+      return NextResponse.json({ message: verification.message }, { status: verification.status });
     }
 
-    if (otpRecord.expiresAt.getTime() < Date.now()) {
-      await otpRecord.deleteOne();
-      return NextResponse.json({ message: "OTP expired." }, { status: 400 });
-    }
-
-    if (otpRecord.otp !== otp) {
-      return NextResponse.json({ message: "Invalid OTP." }, { status: 401 });
-    }
+    const { otpRecord } = verification;
 
     // Double-check user not already registered
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
-      await otpRecord.deleteOne();
       return NextResponse.json({ message: "Email is already registered." }, { status: 409 });
     }
 
@@ -59,7 +65,6 @@ export async function POST(request: Request) {
     });
 
     await user.save();
-    await otpRecord.deleteOne();
 
     const token = signToken({
       userId: user._id.toString(),

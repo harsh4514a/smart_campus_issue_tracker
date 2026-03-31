@@ -2,13 +2,23 @@ import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import { authenticateRequest } from "@/lib/auth";
 import Department from "@/models/Department";
+import { getAdminDepartmentIds, isDeptAdmin, isSuperAdmin } from "@/lib/rbac";
 
 export async function GET(request: Request) {
   await connectDB();
   const auth = await authenticateRequest(request, ["admin"]);
   if (auth instanceof Response) return auth;
 
-  const departments = await Department.find().sort({ name: 1 });
+  const isSuper = isSuperAdmin(auth.user);
+  const isDept = isDeptAdmin(auth.user);
+
+  if (!isSuper && !isDept) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const query = isSuper ? {} : { _id: { $in: getAdminDepartmentIds(auth.user) } };
+
+  const departments = await Department.find(query).sort({ name: 1 });
 
   const departmentsNeedingType = departments.filter(
     (department) => department.type !== "Academic" && department.type !== "Service"
@@ -41,6 +51,10 @@ export async function POST(request: Request) {
   await connectDB();
   const auth = await authenticateRequest(request, ["admin"]);
   if (auth instanceof Response) return auth;
+
+  if (!isSuperAdmin(auth.user)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const { name, type } = await request.json();

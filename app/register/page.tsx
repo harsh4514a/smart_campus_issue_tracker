@@ -493,7 +493,7 @@ export default function RegisterPage() {
 
       saveAuth({ token, user });
       showToast({ message: "Account created successfully!", variant: "success" });
-      router.replace(getRedirectPath(user.role));
+      router.replace(getRedirectPath(user.role, user.adminRole));
       setForm({ ...emptyForm });
       setOtpSent(false);
       setResendTimer(0);
@@ -522,7 +522,7 @@ export default function RegisterPage() {
             <div className="bg-linear-to-r from-emerald-700 to-teal-700 px-10 py-12 text-center text-white">
               <h1 className="text-3xl font-bold mb-3">Create Your Account</h1>
               <p className="text-emerald-100/90">
-                Join CampusTrack • Use your college email only
+                Join CampusTracker • Use your college email only
               </p>
             </div>
 
@@ -702,7 +702,7 @@ export default function RegisterPage() {
       {/* Footer */}
       <footer className="border-t border-emerald-800/40 bg-emerald-950/60 backdrop-blur-md py-6 text-center text-emerald-300/80 text-sm">
         <div className="max-w-7xl mx-auto px-6">
-          <p>© {new Date().getFullYear()} CampusTrack. Smart Campus Issue Tracker.</p>
+          <p>© {new Date().getFullYear()} CampusTracker. Smart Campus Issue Tracker.</p>
 
         </div>
       </footer>

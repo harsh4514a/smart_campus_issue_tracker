@@ -1,22 +1,44 @@
 "use client";
 
+import { Suspense } from "react";
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { saveAuth } from "@/lib/client-auth";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getRedirectPath, loadAuth, saveAuth } from "@/lib/client-auth";
 
 export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <AdminLoginContent />
+    </Suspense>
+  );
+}
+
+function AdminLoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const redirectParam = searchParams.get("redirect") || "";
+  const safeRedirect =
+    redirectParam.startsWith("/") &&
+    !redirectParam.startsWith("//") &&
+    (redirectParam.startsWith("/admin") || redirectParam.startsWith("/dept-admin"))
+      ? redirectParam
+      : null;
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (sessionStorage.getItem("isAdmin") === "true") {
-      router.replace("/admin/dashboard");
+      const auth = loadAuth();
+      const target = auth?.user?.role === "admin"
+        ? getRedirectPath("admin", auth.user.adminRole)
+        : "/admin/login";
+      router.replace(target);
     }
   }, [router]);
 
@@ -42,7 +64,7 @@ export default function AdminLoginPage() {
 
       saveAuth({ token: data.token, user: data.user }, "session");
       sessionStorage.setItem("isAdmin", "true");
-      router.replace("/admin/dashboard");
+      router.replace(safeRedirect || getRedirectPath(data.user.role, data.user.adminRole));
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {

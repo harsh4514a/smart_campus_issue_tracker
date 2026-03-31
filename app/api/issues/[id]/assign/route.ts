@@ -4,6 +4,10 @@ import Issue from "@/models/Issue";
 import Department from "@/models/Department";
 import User from "@/models/User";
 import { authenticateRequest } from "@/lib/auth";
+import { calculateDueDateByPriority } from "@/lib/sla";
+import { createAuditLog } from "@/lib/audit";
+import { sendIssueEventEmail } from "@/lib/issue-mailer";
+import { canAdminAccessIssue } from "@/lib/rbac";
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -43,7 +47,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const normalizedPriority =
       typeof priority === "string" && ["Low", "Medium", "High", "Urgent"].includes(priority)
-        ? priority
+        ? (priority as "Low" | "Medium" | "High" | "Urgent")
         : null;
 
     if (!normalizedPriority) {
@@ -125,17 +129,30 @@ export async function PATCH(request: Request, { params }: Params) {
       );
     }
 
-    const issue = await Issue.findById(id).select("_id");
+    const issue = await Issue.findById(id)
+      .select("_id createdAt title status priority assignedStaff student department academicDepartment serviceDepartment")
+      .populate("student", "name email")
+      .populate("department", "name")
+      .populate("academicDepartment", "name")
+      .populate("serviceDepartment", "name");
     if (!issue) {
       return NextResponse.json({ message: "Issue not found." }, { status: 404 });
     }
+
+    if (!canAdminAccessIssue(authResult.user, issue)) {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
+
+    const oldAssignedStaff = issue.assignedStaff ? String(issue.assignedStaff) : null;
+    const oldPriority = issue.priority;
 
     const updateData: {
       academicDepartment: unknown;
       serviceDepartment: unknown;
       department: unknown;
       assignedStaff: unknown;
-      priority: string;
+      priority: "Low" | "Medium" | "High" | "Urgent";
+      dueDate: Date;
       status?: string;
     } = {
       academicDepartment: academicDept?._id || null,
@@ -143,6 +160,7 @@ export async function PATCH(request: Request, { params }: Params) {
       department: serviceDept?._id || academicDept?._id || null,
       assignedStaff: assignedStaff._id,
       priority: normalizedPriority,
+      dueDate: calculateDueDateByPriority(normalizedPriority, issue.createdAt),
     };
 
     if (status && ["Pending", "In Progress", "Resolved", "Rejected"].includes(status)) {
@@ -157,6 +175,39 @@ export async function PATCH(request: Request, { params }: Params) {
       .populate("academicDepartment")
       .populate("serviceDepartment")
       .populate("assignedStaff", "name email");
+
+    await createAuditLog({
+      issueId: issue._id,
+      action: "Assigned to worker",
+      performedBy: {
+        userId: authResult.user._id,
+        name: authResult.user.name,
+        role: authResult.user.role,
+      },
+      oldValue: { assignedStaff: oldAssignedStaff, priority: oldPriority },
+      newValue: { assignedStaff: assignedStaff.name, priority: normalizedPriority },
+    });
+
+    try {
+      await sendIssueEventEmail({
+        event: "assigned",
+        to: [assignedStaff.email],
+        issue: {
+          id: String(issue._id),
+          title: issue.title,
+          department:
+            (updatedIssue?.serviceDepartment as { name?: string } | null)?.name ||
+            (updatedIssue?.academicDepartment as { name?: string } | null)?.name ||
+            (updatedIssue?.department as { name?: string } | null)?.name ||
+            null,
+          priority: normalizedPriority,
+          status: updatedIssue?.status,
+        },
+        actorName: authResult.user.name,
+      });
+    } catch (mailErr) {
+      console.error("Assign email error", mailErr);
+    }
 
     return NextResponse.json({ message: "Issue assigned", issue: updatedIssue });
   } catch (error) {

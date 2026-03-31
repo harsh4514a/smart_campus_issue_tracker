@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
-import { StudentSidebar, studentNavItems } from "@/app/student/components/StudentSidebar";
+import { StudentSidebar } from "@/app/student/components/StudentSidebar";
 import { StudentNavbar } from "@/app/student/components/StudentNavbar";
 import { authFetch, clearAuth, loadAuth } from "@/lib/client-auth";
+import { useStudentIssues, type StudentIssue } from "@/app/student/components/useStudentIssues";
 import {
   AlertCircle,
   Calendar,
@@ -16,37 +17,29 @@ import {
   PlusCircle,
   Tag,
   Search,
+  Star,
   Trash2,
 } from "lucide-react";
 
 const statusFilters = ["All", "Pending", "In Progress", "Resolved"] as const;
 type StatusFilter = (typeof statusFilters)[number];
 
-type Issue = {
-  _id: string;
-  title: string;
-  description?: string;
-  category: string;
-  status: string;
-  location: string;
-  imageUrl?: string | null;
-  createdAt: string;
-};
+type Issue = StudentIssue;
 
-const POLL_INTERVAL_MS = 10000;
+type FeedbackRecord = {
+  rating: number;
+  comment?: string | null;
+};
 
 export default function StudentIssuesPage() {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useMemo(() => loadAuth(), []);
-  const cacheKey = "scit_issues_cache";
-  const cacheTtlMs = 2 * 60 * 1000;
-  const cachedIssues = readCachedIssues(cacheKey, cacheTtlMs);
-  const [issues, setIssues] = useState<Issue[]>(() => cachedIssues || []);
-  const [loading, setLoading] = useState(() => Boolean(auth) && !cachedIssues);
-  const [error, setError] = useState<string | null>(() =>
-    auth ? null : "You're not authenticated. Please sign in again."
-  );
+  const { issues, loading, error, setError, reload } = useStudentIssues({
+    cacheKey: "scit_issues_cache",
+    cacheTtlMs: 2 * 60 * 1000,
+    pollIntervalMs: 15 * 1000,
+  });
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [userName] = useState(() => auth?.user.name?.trim() || auth?.user.email || "there");
   const [userInitials] = useState(() => getInitials(auth?.user.name || auth?.user.email || "there"));
@@ -55,54 +48,11 @@ export default function StudentIssuesPage() {
   const firstName = userName.split(" ")[0] || "Student";
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    if (!auth) return;
-    let isMounted = true;
-
-    authFetch("/api/issues/mine", { method: "GET" }, auth.token)
-      .then((data) => {
-        if (isMounted) {
-          const latest = data.issues || [];
-          setIssues(latest);
-          writeCachedIssues(cacheKey, latest);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : "Failed to load issues");
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [auth, cacheKey, cacheTtlMs]);
-
-  useEffect(() => {
-    if (!auth) return;
-
-    const intervalId = window.setInterval(() => {
-      if (deletingId) return;
-
-      authFetch("/api/issues/mine", { method: "GET" }, auth.token)
-        .then((data) => {
-          const latest = data.issues || [];
-          setIssues(latest);
-          writeCachedIssues(cacheKey, latest);
-        })
-        .catch(() => {
-          // keep existing list on transient polling failures
-        });
-    }, POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [auth, cacheKey, deletingId]);
+  const [feedbackIssue, setFeedbackIssue] = useState<Issue | null>(null);
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   const filteredIssues = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -110,9 +60,9 @@ export default function StudentIssuesPage() {
       const matchesStatus = statusFilter === "All" ? true : issue.status === statusFilter;
       const matchesSearch =
         !term ||
-        issue.title.toLowerCase().includes(term) ||
-        issue.category.toLowerCase().includes(term) ||
-        issue.location.toLowerCase().includes(term);
+        String(issue.title || "").toLowerCase().includes(term) ||
+        String(issue.category || "").toLowerCase().includes(term) ||
+        String(issue.location || "").toLowerCase().includes(term);
       return matchesStatus && matchesSearch;
     });
   }, [issues, statusFilter, search]);
@@ -130,11 +80,54 @@ export default function StudentIssuesPage() {
     setDeletingId(issueId);
     try {
       await authFetch(`/api/issues/${issueId}`, { method: "DELETE" }, auth.token);
-      setIssues((prev) => prev.filter((issue) => issue._id !== issueId));
+      await reload(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete issue");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const openFeedbackModal = async (issue: Issue) => {
+    if (!auth) return;
+
+    setFeedbackIssue(issue);
+    setFeedbackError(null);
+    setFeedbackRating(5);
+    setFeedbackComment("");
+
+    try {
+      const data = await authFetch(`/api/issues/${issue._id}/feedback`, { method: "GET" }, auth.token);
+      const existing = data.feedback as FeedbackRecord | null;
+      if (existing) {
+        setFeedbackRating(existing.rating || 5);
+        setFeedbackComment(existing.comment || "");
+      }
+    } catch {
+      // keep modal editable even if existing feedback fetch fails
+    }
+  };
+
+  const submitFeedback = async () => {
+    if (!auth || !feedbackIssue) return;
+
+    setFeedbackSubmitting(true);
+    setFeedbackError(null);
+
+    try {
+      await authFetch(
+        `/api/issues/${feedbackIssue._id}/feedback`,
+        {
+          method: "POST",
+          body: JSON.stringify({ rating: feedbackRating, comment: feedbackComment }),
+        },
+        auth.token
+      );
+      setFeedbackIssue(null);
+    } catch (err) {
+      setFeedbackError(err instanceof Error ? err.message : "Failed to submit feedback");
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -161,22 +154,6 @@ export default function StudentIssuesPage() {
           />
 
           <main className="flex-1 overflow-y-auto p-6 space-y-6">
-            <nav className="flex gap-2 lg:hidden">
-              {studentNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex-1 rounded-xl border px-3 py-2 text-center text-sm font-medium ${
-                    pathname === item.href
-                      ? "border-emerald-200 bg-white text-emerald-700"
-                      : "border-transparent bg-emerald-50 text-emerald-600"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-
             {error && !loading && <ErrorPanel message={error} />}
 
             <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
@@ -220,10 +197,65 @@ export default function StudentIssuesPage() {
                     issue={issue}
                     deleting={deletingId === issue._id}
                     onDelete={() => handleDelete(issue._id)}
+                    onRateResolution={() => openFeedbackModal(issue)}
                   />
                 ))
               )}
             </section>
+
+            {feedbackIssue ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+                <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+                  <h3 className="text-lg font-semibold text-slate-900">Rate Resolution</h3>
+                  <p className="mt-1 text-sm text-slate-500">{feedbackIssue.title}</p>
+
+                  <div className="mt-4 flex items-center gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setFeedbackRating(star)}
+                        className={`rounded-full p-1.5 ${feedbackRating >= star ? "text-amber-500" : "text-slate-300"}`}
+                        aria-label={`Rate ${star} star${star > 1 ? "s" : ""}`}
+                      >
+                        <Star size={22} fill={feedbackRating >= star ? "currentColor" : "none"} />
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="mt-4 block text-sm font-medium text-slate-700">
+                    Comment (optional)
+                    <textarea
+                      value={feedbackComment}
+                      onChange={(event) => setFeedbackComment(event.target.value)}
+                      rows={4}
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-500"
+                      placeholder="How satisfied are you with the resolution?"
+                    />
+                  </label>
+
+                  {feedbackError ? <p className="mt-3 text-sm text-rose-600">{feedbackError}</p> : null}
+
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFeedbackIssue(null)}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitFeedback}
+                      disabled={feedbackSubmitting}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                    >
+                      {feedbackSubmitting ? "Submitting..." : "Submit Feedback"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </main>
         </div>
       </div>
@@ -231,7 +263,17 @@ export default function StudentIssuesPage() {
   );
 }
 
-function IssueCard({ issue, deleting, onDelete }: { issue: Issue; deleting: boolean; onDelete: () => void }) {
+function IssueCard({
+  issue,
+  deleting,
+  onDelete,
+  onRateResolution,
+}: {
+  issue: Issue;
+  deleting: boolean;
+  onDelete: () => void;
+  onRateResolution: () => void;
+}) {
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -239,6 +281,7 @@ function IssueCard({ issue, deleting, onDelete }: { issue: Issue; deleting: bool
           <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-lg font-semibold text-slate-900">{issue.title}</h3>
             <StatusBadge status={issue.status} />
+            {isOverdue(issue.dueDate, issue.status) ? <OverdueBadge /> : null}
           </div>
           {issue.description && <p className="text-sm text-slate-500">{issue.description}</p>}
         </div>
@@ -247,7 +290,7 @@ function IssueCard({ issue, deleting, onDelete }: { issue: Issue; deleting: bool
           <div className="h-20 w-28 overflow-hidden rounded-xl border border-slate-100 bg-slate-50">
             <Image
               src={issue.imageUrl}
-              alt={issue.title}
+              alt={issue.title || "Issue image"}
               width={112}
               height={80}
               className="h-full w-full object-cover"
@@ -271,6 +314,15 @@ function IssueCard({ issue, deleting, onDelete }: { issue: Issue; deleting: bool
           >
             <Trash2 size={14} /> {deleting ? "Deleting..." : "Delete"}
           </button>
+          {issue.status === "Resolved" ? (
+            <button
+              type="button"
+              onClick={onRateResolution}
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50"
+            >
+              <Star size={14} /> Rate
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -281,7 +333,7 @@ function IssueCard({ issue, deleting, onDelete }: { issue: Issue; deleting: bool
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Calendar size={14} />
-          {formatDate(issue.createdAt)}
+          {issue.createdAt ? formatDate(issue.createdAt) : "-"}
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
           <Tag size={12} />
@@ -352,6 +404,24 @@ function formatDate(dateString: string) {
   });
 }
 
+function isOverdue(dueDate?: string, status?: string) {
+  if (!dueDate) return false;
+  if (status === "Resolved") return false;
+
+  const due = new Date(dueDate).getTime();
+  if (Number.isNaN(due)) return false;
+
+  return Date.now() > due;
+}
+
+function OverdueBadge() {
+  return (
+    <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+      Overdue
+    </span>
+  );
+}
+
 function getInitials(value: string) {
   const initials = value
     .split(" ")
@@ -366,27 +436,4 @@ function getInitials(value: string) {
 function formatRoleLabel(role?: string) {
   if (!role) return "Student";
   return role.charAt(0).toUpperCase() + role.slice(1);
-}
-
-function readCachedIssues(key: string, ttlMs: number) {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { timestamp: number; issues: Issue[] };
-    if (!parsed.timestamp || !Array.isArray(parsed.issues)) return null;
-    if (Date.now() - parsed.timestamp > ttlMs) return null;
-    return parsed.issues;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedIssues(key: string, issues: Issue[]) {
-  if (typeof window === "undefined") return;
-  try {
-    sessionStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), issues }));
-  } catch {
-    // ignore storage failures
-  }
 }

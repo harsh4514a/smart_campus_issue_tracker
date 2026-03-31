@@ -6,7 +6,7 @@ const DEMO_STUDENT_PASSWORD = process.env.DEMO_STUDENT_PASSWORD || "DemoStudent@
 const DEMO_STAFF_EMAIL = (process.env.DEMO_STAFF_EMAIL || "demo.worker@charusat.ac.in").trim().toLowerCase();
 const DEMO_STAFF_PASSWORD = process.env.DEMO_STAFF_PASSWORD || "DemoWorker@123";
 
-const DEMO_ADMIN_EMAIL = (process.env.DEMO_ADMIN_EMAIL || "demo.admin@campustracker.com").trim().toLowerCase();
+const DEMO_ADMIN_EMAIL = (process.env.DEMO_ADMIN_EMAIL || "demo.admin@CampusTrackerer.com").trim().toLowerCase();
 const DEMO_ADMIN_PASSWORD = process.env.DEMO_ADMIN_PASSWORD || "DemoAdmin@123";
 
 type DemoSeed = {

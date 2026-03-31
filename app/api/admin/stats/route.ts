@@ -4,6 +4,7 @@ import { authenticateRequest } from "@/lib/auth";
 import User from "@/models/User";
 import Issue from "@/models/Issue";
 import Department from "@/models/Department";
+import { getDepartmentScopedIssueFilter } from "@/lib/rbac";
 
 export async function GET(request: Request) {
   await connectDB();
@@ -15,7 +16,8 @@ export async function GET(request: Request) {
     const now = new Date();
     const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const overdueThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const issueScopeFilter = getDepartmentScopedIssueFilter(auth.user);
 
     const [
       studentCount,
@@ -33,39 +35,50 @@ export async function GET(request: Request) {
       pendingPreviousMonth,
       resolvedCurrentMonth,
       resolvedPreviousMonth,
+      recurringCount,
       issuesForDepartment,
     ] = await Promise.all([
       User.countDocuments({ role: "student" }),
       User.countDocuments({ role: "faculty" }),
       User.countDocuments({ role: "staff" }),
       Department.countDocuments({}),
-      Issue.countDocuments({}),
-      Issue.countDocuments({ status: "Pending" }),
-      Issue.countDocuments({ status: "In Progress" }),
-      Issue.countDocuments({ status: "Resolved" }),
-      Issue.countDocuments({ assignedStaff: { $ne: null } }),
-      Issue.countDocuments({ assignedStaff: null }),
+      Issue.countDocuments(issueScopeFilter),
+      Issue.countDocuments({ ...issueScopeFilter, status: "Pending" }),
+      Issue.countDocuments({ ...issueScopeFilter, status: "In Progress" }),
+      Issue.countDocuments({ ...issueScopeFilter, status: "Resolved" }),
       Issue.countDocuments({
-        status: { $ne: "Resolved" },
-        createdAt: { $lt: overdueThreshold },
+        ...issueScopeFilter,
+        assignedStaff: { $ne: null },
+        status: { $in: ["Pending", "In Progress"] },
+      }),
+      Issue.countDocuments({ ...issueScopeFilter, assignedStaff: null }),
+      Issue.countDocuments({
+        ...issueScopeFilter,
+        status: { $nin: ["Resolved", "Rejected"] },
+        dueDate: { $lt: now },
       }),
       Issue.countDocuments({
+        ...issueScopeFilter,
         status: "Pending",
         createdAt: { $gte: startOfCurrentMonth },
       }),
       Issue.countDocuments({
+        ...issueScopeFilter,
         status: "Pending",
         createdAt: { $gte: startOfPreviousMonth, $lt: startOfCurrentMonth },
       }),
       Issue.countDocuments({
+        ...issueScopeFilter,
         status: "Resolved",
         createdAt: { $gte: startOfCurrentMonth },
       }),
       Issue.countDocuments({
+        ...issueScopeFilter,
         status: "Resolved",
         createdAt: { $gte: startOfPreviousMonth, $lt: startOfCurrentMonth },
       }),
-      Issue.find({}, "department academicDepartment serviceDepartment")
+      Issue.countDocuments({ ...issueScopeFilter, recurring: true }),
+      Issue.find(issueScopeFilter, "department academicDepartment serviceDepartment")
         .populate("department", "name")
         .populate("academicDepartment", "name")
         .populate("serviceDepartment", "name")
@@ -112,6 +125,7 @@ export async function GET(request: Request) {
       needsAttention: {
         unassigned: unassignedCount,
         overdue: overdueCount,
+        recurring: recurringCount,
       },
       insights: {
         topDepartment: topDepartment

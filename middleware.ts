@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   "/api/auth/verify-otp",
   "/api/auth/request-password-reset",
   "/api/auth/reset-password",
+  "/api/auth/set-password",
 ];
 
 const ROLE_RULES: { pattern: RegExp; roles: Array<"student" | "faculty" | "staff" | "admin"> }[] = [

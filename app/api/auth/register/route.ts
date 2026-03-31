@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       email,
       password,
       role: "student",
+      emailNotificationsEnabled: true,
       department: null,
       studentId,
       course,

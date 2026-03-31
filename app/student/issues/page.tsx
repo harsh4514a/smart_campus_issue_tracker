@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Protected from "@/components/Protected";
-import { StudentSidebar, studentNavItems } from "@/app/student/components/StudentSidebar";
+import { StudentSidebar } from "@/app/student/components/StudentSidebar";
 import { StudentNavbar } from "@/app/student/components/StudentNavbar";
 import { authFetch, clearAuth, loadAuth } from "@/lib/client-auth";
-import { ClipboardList, Search } from "lucide-react";
+import { ClipboardList, Search, SlidersHorizontal } from "lucide-react";
 
 type Issue = {
   _id: string;
@@ -18,23 +17,30 @@ type Issue = {
   createdAt: string;
 };
 
+type SortBy = "created_desc" | "created_asc" | "status" | "category";
+
 const PAGE_LIMIT = 20;
+const STATUS_OPTIONS = ["All", "Pending", "In Progress", "Resolved", "Rejected"] as const;
 
 export default function StudentAllIssuesPage() {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useMemo(() => loadAuth(), []);
+
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(() => Boolean(auth));
-  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_OPTIONS)[number]>("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
-  const [buildingFilter, setBuildingFilter] = useState("All");
-  const [roomFilter, setRoomFilter] = useState("All");
+  const [sortBy, setSortBy] = useState<SortBy>("created_desc");
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(["All"]);
 
   const userName = auth?.user.name?.trim() || auth?.user.email || "Student";
   const userEmail = auth?.user.email || "student@example.com";
@@ -42,93 +48,121 @@ export default function StudentAllIssuesPage() {
   const userRoleLabel = formatRoleLabel(auth?.user.role);
   const firstName = userName.split(" ")[0] || "Student";
 
-  const fetchIssuesPage = async (pageToLoad: number, append: boolean) => {
-    if (!auth) return;
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setSearchQuery(next);
+      setPage(1);
+    }, 300);
 
-    const data = await authFetch(`/api/issues?page=${pageToLoad}&limit=${PAGE_LIMIT}`, { method: "GET" }, auth.token);
-    const incoming = Array.isArray(data?.issues) ? (data.issues as Issue[]) : [];
-
-    setIssues((prev) => {
-      if (!append) return incoming;
-
-      const merged = [...prev, ...incoming];
-      const uniqueById = new Map(merged.map((issue) => [issue._id, issue]));
-      return Array.from(uniqueById.values());
-    });
-
-    setPage(pageToLoad);
-    setHasMore(Boolean(data?.hasMore));
-    setError(null);
-  };
+    return () => window.clearTimeout(timeoutId);
+  }, [searchInput]);
 
   useEffect(() => {
     if (!auth) {
-      setLoading(false);
       return;
     }
 
-    setLoading(true);
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(PAGE_LIMIT),
+      sortBy,
+    });
 
-    fetchIssuesPage(1, false)
-      .catch((err) => {
+    if (searchQuery) {
+      params.set("search", searchQuery);
+    }
+
+    if (statusFilter !== "All") {
+      params.set("status", statusFilter);
+    }
+
+    if (categoryFilter !== "All") {
+      params.set("category", categoryFilter);
+    }
+
+    const controller = new AbortController();
+    const loadingTimeoutId = window.setTimeout(() => {
+      setLoading(true);
+    }, 0);
+
+    authFetch(`/api/issues?${params.toString()}`, { method: "GET", signal: controller.signal }, auth.token)
+      .then((data: unknown) => {
+        if (controller.signal.aborted) return;
+
+        const payload = (data || {}) as {
+          issues?: Issue[];
+          page?: number;
+          totalPages?: number;
+          totalItems?: number;
+        };
+
+        const nextIssues = Array.isArray(payload.issues) ? payload.issues : [];
+        setIssues(nextIssues);
+
+        const nextTotalItems =
+          typeof payload.totalItems === "number" && Number.isFinite(payload.totalItems)
+            ? payload.totalItems
+            : nextIssues.length;
+        const nextTotalPages =
+          typeof payload.totalPages === "number" && Number.isFinite(payload.totalPages)
+            ? Math.max(1, payload.totalPages)
+            : Math.max(1, Math.ceil(nextTotalItems / PAGE_LIMIT));
+        const nextPage = typeof payload.page === "number" && Number.isFinite(payload.page) ? payload.page : page;
+
+        setTotalItems(nextTotalItems);
+        setTotalPages(nextTotalPages);
+        if (nextPage !== page) {
+          setPage(nextPage);
+        }
+
+        const incomingCategories = nextIssues
+          .map((issue) => issue.category?.trim())
+          .filter((value): value is string => Boolean(value));
+
+        setCategoryOptions((prev) => {
+          const merged = new Set(prev.filter((value) => value !== "All"));
+          for (const category of incomingCategories) {
+            merged.add(category);
+          }
+          if (categoryFilter !== "All") {
+            merged.add(categoryFilter);
+          }
+          return ["All", ...Array.from(merged).sort((a, b) => a.localeCompare(b))];
+        });
+
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || isAbortError(err)) return;
         setError(err instanceof Error ? err.message : "Failed to load all issues");
       })
-      .finally(() => setLoading(false));
-  }, [auth]);
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
 
-  const handleLoadMore = async () => {
-    if (!auth || loadingMore || !hasMore) return;
+    return () => {
+      window.clearTimeout(loadingTimeoutId);
+      controller.abort();
+    };
+  }, [auth, categoryFilter, page, searchQuery, sortBy, statusFilter]);
 
-    setLoadingMore(true);
-    try {
-      await fetchIssuesPage(page + 1, true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load more issues");
-    } finally {
-      setLoadingMore(false);
-    }
+  const showingStart = totalItems === 0 ? 0 : (page - 1) * PAGE_LIMIT + 1;
+  const showingEnd = totalItems === 0 ? 0 : Math.min(page * PAGE_LIMIT, totalItems);
+
+  const resetFilters = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setStatusFilter("All");
+    setCategoryFilter("All");
+    setSortBy("created_desc");
+    setPage(1);
   };
 
-  const categoryOptions = useMemo(() => {
-    return ["All", ...Array.from(new Set(issues.map((issue) => issue.category).filter(Boolean)))];
-  }, [issues]);
-
-  const roomOptions = useMemo(() => {
-    const rooms = issues.map((issue) => splitLocation(issue.location).room).filter((room) => room && room !== "-");
-    return ["All", ...Array.from(new Set(rooms))];
-  }, [issues]);
-
-  const buildingOptions = useMemo(() => {
-    const buildings = issues
-      .map((issue) => splitLocation(issue.location).building)
-      .filter((building) => building && building !== "-");
-    return ["All", ...Array.from(new Set(buildings))];
-  }, [issues]);
-
-  const filteredIssues = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return issues.filter((issue) => {
-      const { building, room } = splitLocation(issue.location);
-      const matchesStatus = statusFilter === "All" || issue.status === statusFilter;
-      const matchesCategory = categoryFilter === "All" || issue.category === categoryFilter;
-      const matchesBuilding = buildingFilter === "All" || building === buildingFilter;
-      const matchesRoom = roomFilter === "All" || room === roomFilter;
-      const matchesSearch =
-        !term ||
-        issue.title.toLowerCase().includes(term) ||
-        issue.category.toLowerCase().includes(term) ||
-        issue.location.toLowerCase().includes(term) ||
-        issue.status.toLowerCase().includes(term);
-
-      return (
-        matchesStatus &&
-        matchesCategory &&
-        matchesBuilding &&
-        matchesRoom &&
-        matchesSearch
-      );
-    });
-  }, [issues, search, statusFilter, categoryFilter, buildingFilter, roomFilter]);
+  const hasActiveFilters =
+    searchQuery.length > 0 || statusFilter !== "All" || categoryFilter !== "All" || sortBy !== "created_desc";
 
   return (
     <Protected allowedRoles={["student", "faculty"]}>
@@ -151,60 +185,50 @@ export default function StudentAllIssuesPage() {
               router.replace("/login");
             }}
             title="All Issues"
-            subtitle="Browse campus issues and track current status."
+            subtitle="Browse campus issues and monitor resolution progress."
           />
 
           <main className="flex-1 overflow-y-auto p-6 space-y-6">
-            <nav className="flex gap-2 lg:hidden">
-              {studentNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex-1 rounded-xl border px-3 py-2 text-center text-sm font-medium ${
-                    pathname === item.href
-                      ? "border-emerald-200 bg-white text-emerald-700"
-                      : "border-transparent bg-emerald-50 text-emerald-600"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-
-            {error && (
+            {error ? (
               <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
               </div>
-            )}
+            ) : null}
 
             <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                <label className="relative block md:col-span-2 xl:col-span-1">
+                <label className="relative block md:col-span-2 xl:col-span-2">
                   <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 pl-10 pr-4 py-2.5 text-sm text-slate-700 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/30"
-                    placeholder="Search issues..."
+                    placeholder="Search by title, category, location"
                   />
                 </label>
 
                 <select
                   value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
+                  onChange={(event) => {
+                    setStatusFilter(event.target.value as (typeof STATUS_OPTIONS)[number]);
+                    setPage(1);
+                  }}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/30"
                 >
-                  <option value="All">All Statuses</option>
-                  <option value="Pending">Pending</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Resolved">Resolved</option>
-                  <option value="Rejected">Rejected</option>
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {status === "All" ? "All Statuses" : status}
+                    </option>
+                  ))}
                 </select>
 
                 <select
                   value={categoryFilter}
-                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  onChange={(event) => {
+                    setCategoryFilter(event.target.value);
+                    setPage(1);
+                  }}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/30"
                 >
                   {categoryOptions.map((category) => (
@@ -215,32 +239,45 @@ export default function StudentAllIssuesPage() {
                 </select>
 
                 <select
-                  value={buildingFilter}
-                  onChange={(event) => setBuildingFilter(event.target.value)}
+                  value={sortBy}
+                  onChange={(event) => {
+                    setSortBy(event.target.value as SortBy);
+                    setPage(1);
+                  }}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/30"
                 >
-                  {buildingOptions.map((building) => (
-                    <option key={building} value={building}>
-                      {building === "All" ? "All Buildings" : building}
-                    </option>
-                  ))}
+                  <option value="created_desc">Sort: Newest</option>
+                  <option value="created_asc">Sort: Oldest</option>
+                  <option value="status">Sort: Status</option>
+                  <option value="category">Sort: Category</option>
                 </select>
+              </div>
 
-                <select
-                  value={roomFilter}
-                  onChange={(event) => setRoomFilter(event.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/30"
-                >
-                  {roomOptions.map((room) => (
-                    <option key={room} value={room}>
-                      {room === "All" ? "All Rooms" : room}
-                    </option>
-                  ))}
-                </select>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600">
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  {hasActiveFilters ? "Filters applied" : "No filters applied"}
+                </div>
+                {hasActiveFilters ? (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Clear All Filters
+                  </button>
+                ) : null}
               </div>
             </section>
 
             <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/80 px-4 py-3 text-xs text-slate-600">
+                <span>
+                  Showing {showingStart}-{showingEnd} of {totalItems} issues
+                </span>
+                {loading ? <span className="rounded-full bg-slate-200 px-2 py-0.5">Refreshing...</span> : null}
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50">
@@ -259,7 +296,7 @@ export default function StudentAllIssuesPage() {
                       <tr>
                         <td className="px-4 py-6 text-sm text-slate-500" colSpan={6}>Loading issues...</td>
                       </tr>
-                    ) : filteredIssues.length === 0 ? (
+                    ) : issues.length === 0 ? (
                       <tr>
                         <td className="px-4 py-10 text-center text-sm text-slate-500" colSpan={6}>
                           <div className="flex flex-col items-center gap-2">
@@ -269,7 +306,7 @@ export default function StudentAllIssuesPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredIssues.map((issue) => {
+                      issues.map((issue) => {
                         const { building, room } = splitLocation(issue.location);
 
                         return (
@@ -289,20 +326,31 @@ export default function StudentAllIssuesPage() {
                   </tbody>
                 </table>
               </div>
-            </section>
 
-            {!loading && hasMore && (
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  onClick={handleLoadMore}
-                  disabled={loadingMore}
-                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loadingMore ? "Loading..." : "Load More"}
-                </button>
+              <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    disabled={loading || page <= 1}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs font-medium text-slate-600">
+                    Page {page} of {Math.max(1, totalPages)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={loading || page >= totalPages}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
-            )}
+            </section>
           </main>
         </div>
       </div>
@@ -311,10 +359,35 @@ export default function StudentAllIssuesPage() {
 }
 
 function splitLocation(location: string) {
-  const [building = "-", room = "-"] = String(location || "").split(" · ");
+  const normalized = String(location || "").trim();
+  if (!normalized || normalized.toLowerCase() === "not specified") {
+    return { building: "-", room: "-" };
+  }
+
+  const splitBy = (delimiter: string) =>
+    normalized
+      .split(delimiter)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const dotParts = splitBy(" · ");
+  if (dotParts.length >= 2) {
+    return { building: dotParts[0], room: dotParts[1] };
+  }
+
+  const pipeParts = splitBy("|");
+  if (pipeParts.length >= 2) {
+    return { building: pipeParts[0], room: pipeParts[1] };
+  }
+
+  const commaParts = splitBy(",");
+  if (commaParts.length >= 2) {
+    return { building: commaParts[0], room: commaParts[1] };
+  }
+
   return {
-    building: building || "-",
-    room: room || "-",
+    building: normalized,
+    room: "-",
   };
 }
 
@@ -323,10 +396,10 @@ function StatusBadge({ status }: { status: string }) {
     status === "Resolved"
       ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
       : status === "In Progress"
-      ? "bg-sky-50 text-sky-700 border border-sky-100"
-      : status === "Pending"
-      ? "bg-amber-50 text-amber-700 border border-amber-100"
-      : "bg-slate-100 text-slate-600 border border-slate-200";
+        ? "bg-sky-50 text-sky-700 border border-sky-100"
+        : status === "Pending"
+          ? "bg-amber-50 text-amber-700 border border-amber-100"
+          : "bg-slate-100 text-slate-600 border border-slate-200";
 
   return <span className={`rounded-full px-3 py-1 text-xs font-semibold ${palette}`}>{status}</span>;
 }
@@ -355,4 +428,8 @@ function getInitials(value: string) {
 function formatRoleLabel(role?: string) {
   if (!role) return "Student";
   return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }

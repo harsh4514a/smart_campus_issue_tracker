@@ -32,7 +32,7 @@ export default function HomeNavbar({ actions = defaultActions }: HomeNavbarProps
           <div className="w-10 h-10 rounded-lg flex items-center justify-center">
             <Image
               src="/images/logo1.png?v=2"
-              alt="CampusTrack Logo"
+              alt="CampusTracker Logo"
               width={48}
               height={48}
               className="h-15 w-15 object-contain -m-1"
@@ -41,7 +41,7 @@ export default function HomeNavbar({ actions = defaultActions }: HomeNavbarProps
               unoptimized
             />
           </div>
-          <span className="text-xl font-semibold text-white">CampusTrack</span>
+          <span className="text-xl font-semibold text-white">CampusTracker</span>
         </Link>
 
         {actions.length > 0 && (

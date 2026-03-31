@@ -1,43 +1,56 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loadAuth } from "@/lib/client-auth";
+import { AdminRole, loadAuth } from "@/lib/client-auth";
 
-export default function AdminProtected({ children }: { children: React.ReactNode }) {
+type AllowedAdminRole = "super_admin" | "dept_admin" | "worker";
+
+export default function AdminProtected({
+  children,
+  allowedAdminRoles,
+}: {
+  children: React.ReactNode;
+  allowedAdminRoles?: AllowedAdminRole[];
+}) {
   const router = useRouter();
-
-  const hasAccess = useSyncExternalStore(
-    () => () => {},
-    () => {
-      const isAdminFlag = sessionStorage.getItem("isAdmin") === "true";
-      const auth = loadAuth();
-      return isAdminFlag && !!auth && auth.user.role === "admin";
-    },
-    () => false
-  );
+  const [hasAccess, setHasAccess] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
 
   useEffect(() => {
-    if (hasAccess) {
-      return;
-    }
-
-    const redirectTimer = window.setTimeout(() => {
+    const checkAccess = () => {
       const isAdminFlag = sessionStorage.getItem("isAdmin") === "true";
       const auth = loadAuth();
+      const currentRole = (auth?.user.adminRole || null) as AdminRole | null;
+      const roleAllowed =
+        !allowedAdminRoles || (currentRole ? allowedAdminRoles.includes(currentRole as AllowedAdminRole) : false);
       const stillUnauthorized = !isAdminFlag || !auth || auth.user.role !== "admin";
 
       if (stillUnauthorized) {
+        setHasAccess(false);
+        setCheckingAccess(false);
         router.replace("/admin/login");
+      } else if (!roleAllowed) {
+        setHasAccess(false);
+        setCheckingAccess(false);
+        router.replace("/unauthorized");
+      } else {
+        setHasAccess(true);
+        setCheckingAccess(false);
       }
-    }, 150);
+    };
+
+    checkAccess();
+
+    const onStorage = () => checkAccess();
+    window.addEventListener("storage", onStorage);
 
     return () => {
-      window.clearTimeout(redirectTimer);
+      window.removeEventListener("storage", onStorage);
     };
-  }, [hasAccess, router]);
+  }, [allowedAdminRoles, router]);
 
-  if (!hasAccess) {
+  if (checkingAccess || !hasAccess) {
     return (
       <div className="flex h-full min-h-screen items-center justify-center text-gray-600">
         Checking access...

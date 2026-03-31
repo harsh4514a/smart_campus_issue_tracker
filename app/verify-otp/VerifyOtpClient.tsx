@@ -27,7 +27,7 @@ export default function VerifyOtpClient() {
         body: JSON.stringify({ email, otp }),
       });
       saveAuth({ token: data.token, user: data.user });
-      router.replace(getRedirectPath(data.user.role));
+      router.replace(getRedirectPath(data.user.role, data.user.adminRole));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Verification failed";
       setStatus(message);

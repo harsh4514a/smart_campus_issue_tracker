@@ -148,24 +148,31 @@ Run development server:
 ```bash
  npm run dev
 ```
----
 
-## 🎯 Highlights
+## Demo Users (View Only)
 
-- Full-stack MERN application  
-- Role-based access control (RBAC)  
-- 47 RESTful APIs  
-- Admin + Department Admin dashboards  
-- Real-time issue tracking  
-- Scalable and modular architecture  
+The app auto-creates three demo users when auth endpoints are used.
+These accounts are strictly read-only and cannot perform create/update/delete actions.
 
----
+Student panel demo user:
 
-## 📌 Future Enhancements
+```text
+Email: demo.student@charusat.edu.in
+Password: DemoStudent@123
+```
 
-- Real-time notifications (WebSockets)  
-- AI-based issue prioritization  
-- Mobile app support  
-- Advanced analytics & insights  
+Worker (staff) panel demo user:
 
----
+```text
+Email: demo.worker@charusat.ac.in
+Password: DemoWorker@123
+```
+
+Admin panel demo user:
+
+```text
+Email: demo.admin@campustracker.com
+Password: DemoAdmin@123
+```
+
+You can override these credentials through environment variables shown in env.example.

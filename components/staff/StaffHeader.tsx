@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -15,7 +16,8 @@ export default function StaffHeader({ title, subtitle }: StaffHeaderProps) {
   const router = useRouter();
   const auth = loadAuth();
   const name = auth?.user?.name || "Staff User";
-  const email = auth?.user?.email || "staff@campustrack.local";
+  const email = auth?.user?.email || "staff@CampusTracker.local";
+  const avatarUrl = auth?.user?.avatarUrl || "";
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -72,7 +74,18 @@ export default function StaffHeader({ title, subtitle }: StaffHeaderProps) {
             className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
             title={name}
           >
-            {initial}
+            {avatarUrl ? (
+              <Image
+                src={avatarUrl}
+                alt="Profile avatar"
+                width={40}
+                height={40}
+                className="h-10 w-10 rounded-full object-cover"
+                unoptimized
+              />
+            ) : (
+              initial
+            )}
           </button>
 
           {menuOpen && (
