@@ -120,7 +120,11 @@ The system provides demo accounts for testing (no create/update/delete access).
 
 - Admin  
   Email: demo.admin@campustracker.com  
-  Password: DemoAdmin@123  
+  Password: DemoAdmin@123
+
+- Department Admin
+  Email:demo.deptadmin@charusat.ac.in
+  Password: DemoDeptAdmin@123
 
 You can override these credentials using environment variables from `env.example`.
 
