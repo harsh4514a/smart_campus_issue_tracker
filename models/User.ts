@@ -13,6 +13,8 @@ export interface IUser extends Document {
   adminRole?: AdminRole | null;
   designation?: string | null;
   isActive?: boolean;
+  deactivatedAt?: Date | null;
+  deactivatedBy?: mongoose.Types.ObjectId | null;
   emailNotificationsEnabled?: boolean;
   isDemoUser?: boolean;
   department?: mongoose.Types.ObjectId | null;
@@ -51,6 +53,8 @@ const UserSchema = new Schema<IUser>(
     },
     designation: { type: String, trim: true, default: null },
     isActive: { type: Boolean, default: true },
+    deactivatedAt: { type: Date, default: null },
+    deactivatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     emailNotificationsEnabled: { type: Boolean, default: true },
     isDemoUser: { type: Boolean, default: false },
     department: { type: Schema.Types.ObjectId, ref: "Department", default: null },
@@ -64,6 +68,12 @@ const UserSchema = new Schema<IUser>(
   },
   { timestamps: true }
 );
+
+// Query indexes for admin and dept-admin list endpoints.
+UserSchema.index({ role: 1, adminRole: 1, isActive: 1 });
+UserSchema.index({ role: 1, department: 1, isActive: 1 });
+UserSchema.index({ role: 1, academicDepartment: 1, isActive: 1 });
+UserSchema.index({ role: 1, serviceDepartment: 1, isActive: 1 });
 
 UserSchema.pre("save", async function hashPassword(next) {
   const user = this as IUser;
@@ -156,6 +166,18 @@ if (cachedUserModel && !cachedUserModel.schema.path("designation")) {
 if (cachedUserModel && !cachedUserModel.schema.path("isActive")) {
   cachedUserModel.schema.add({
     isActive: { type: Boolean, default: true },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("deactivatedAt")) {
+  cachedUserModel.schema.add({
+    deactivatedAt: { type: Date, default: null },
+  });
+}
+
+if (cachedUserModel && !cachedUserModel.schema.path("deactivatedBy")) {
+  cachedUserModel.schema.add({
+    deactivatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   });
 }
 

@@ -45,6 +45,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "User not found." }, { status: 404 });
     }
 
+    if (user.isActive === false) {
+      return NextResponse.json({ message: "Your account is deactivated. Contact admin." }, { status: 403 });
+    }
+
     user.password = otpRecord.passwordHash;
     await user.save();
 

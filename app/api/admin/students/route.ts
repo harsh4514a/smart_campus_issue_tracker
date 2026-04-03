@@ -13,6 +13,14 @@ export async function GET(request: Request) {
   }
 
   const studentQuery: Record<string, unknown> = { role: { $in: ["student", "faculty"] } };
+  const statusParam = new URL(request.url).searchParams.get("status")?.trim().toLowerCase();
+
+  if (statusParam === "active") {
+    studentQuery.isActive = { $ne: false };
+  } else if (statusParam === "inactive") {
+    studentQuery.isActive = false;
+  }
+
   if (process.env.NODE_ENV === "production") {
     studentQuery.isDemoUser = { $ne: true };
   }

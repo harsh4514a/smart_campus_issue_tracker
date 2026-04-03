@@ -151,8 +151,9 @@ Run development server:
 
 ## Demo Users (View Only)
 
-The app auto-creates three demo users when auth endpoints are used.
+The app auto-creates four demo users when auth endpoints are used.
 These accounts are strictly read-only and cannot perform create/update/delete actions.
+No transactional or notification emails are sent to demo users.
 
 Student panel demo user:
 
@@ -173,6 +174,13 @@ Admin panel demo user:
 ```text
 Email: demo.admin@campustracker.com
 Password: DemoAdmin@123
+```
+
+Department Admin panel demo user:
+
+```text
+Email: demo.deptadmin@charusat.ac.in
+Password: DemoDeptAdmin@123
 ```
 
 You can override these credentials through environment variables shown in env.example.

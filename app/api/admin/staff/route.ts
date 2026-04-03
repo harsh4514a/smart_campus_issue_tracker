@@ -22,7 +22,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
-  const includeAdminRoles = new URL(request.url).searchParams.get("includeAdminRoles") === "1";
+  const searchParams = new URL(request.url).searchParams;
+  const includeAdminRoles = searchParams.get("includeAdminRoles") === "1";
+  const statusParam = searchParams.get("status")?.trim().toLowerCase();
 
   const query: Record<string, unknown> = isSuper
     ? includeAdminRoles
@@ -41,6 +43,12 @@ export async function GET(request: Request) {
           { serviceDepartment: { $in: getAdminDepartmentIds(auth.user) } },
         ],
       };
+
+  if (statusParam === "active") {
+    query.isActive = { $ne: false };
+  } else if (statusParam === "inactive") {
+    query.isActive = false;
+  }
 
   if (process.env.NODE_ENV === "production") {
     query.isDemoUser = { $ne: true };

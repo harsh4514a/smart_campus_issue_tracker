@@ -5,7 +5,7 @@ import AdminProtected from "@/components/AdminProtected";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 import AdminShell from "@/components/admin/AdminShell";
 import { useToast } from "@/components/ToastProvider";
-import { AlertTriangle, BriefcaseBusiness, Pencil, Search, Trash2, UserCheck, UserPlus, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, BriefcaseBusiness, Pencil, Search, UserCheck, UserPlus, UserX, Users, X } from "lucide-react";
 
 type Department = { _id: string; name: string; type?: "Academic" | "Service" };
 type Faculty = {
@@ -44,10 +44,12 @@ export default function AdminStaffPage() {
   const [query, setQuery] = useState("");
   const [academicFilter, setAcademicFilter] = useState("All");
   const [serviceFilter, setServiceFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState<"All" | "Active" | "Inactive">("All");
+  const [statusFilter, setStatusFilter] = useState<"Active" | "Inactive">("Active");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [statusActionTarget, setStatusActionTarget] = useState<Faculty | null>(null);
+  const [statusActionMode, setStatusActionMode] = useState<"activate" | "deactivate" | null>(null);
+  const [statusActionSubmitting, setStatusActionSubmitting] = useState(false);
   const [activeIssueMap, setActiveIssueMap] = useState<Record<string, number>>({});
   const [sortBy, setSortBy] = useState<"joined_desc" | "joined_asc" | "status" | "department">("joined_desc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -113,14 +115,14 @@ export default function AdminStaffPage() {
   useEffect(() => {
     if (!auth) return;
     const intervalId = window.setInterval(() => {
-      if (!saving && !deletingId && !showForm) {
+      if (!saving && !statusActionSubmitting && !showForm) {
         loadData(true);
       }
     }, POLL_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth, saving, deletingId, showForm]);
+  }, [auth, saving, statusActionSubmitting, showForm]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -238,11 +240,7 @@ export default function AdminStaffPage() {
         staffAcademicDepartmentIds.includes(academicFilter);
       const serviceMatch = serviceFilter === "All" || staffServiceDepartmentId === serviceFilter;
       const statusMatch =
-        statusFilter === "All"
-          ? true
-          : statusFilter === "Active"
-            ? staff.isActive !== false
-            : staff.isActive === false;
+        statusFilter === "Active" ? staff.isActive !== false : staff.isActive === false;
 
       if (!academicMatch || !serviceMatch || !statusMatch) return false;
 
@@ -294,7 +292,7 @@ export default function AdminStaffPage() {
       const label = departments.find((department) => department._id === serviceFilter)?.name || "Service";
       chips.push({ key: "service", label: `Service: ${label}` });
     }
-    if (statusFilter !== "All") chips.push({ key: "status", label: `Status: ${statusFilter}` });
+    if (statusFilter === "Inactive") chips.push({ key: "status", label: "Status: Inactive" });
     return chips;
   }, [academicFilter, departments, query, serviceFilter, statusFilter]);
 
@@ -302,7 +300,7 @@ export default function AdminStaffPage() {
     if (key === "query") setQuery("");
     if (key === "academic") setAcademicFilter("All");
     if (key === "service") setServiceFilter("All");
-    if (key === "status") setStatusFilter("All");
+    if (key === "status") setStatusFilter("Active");
     setCurrentPage(1);
   };
 
@@ -310,7 +308,7 @@ export default function AdminStaffPage() {
     setQuery("");
     setAcademicFilter("All");
     setServiceFilter("All");
-    setStatusFilter("All");
+    setStatusFilter("Active");
     setSortBy("joined_desc");
     setCurrentPage(1);
   };
@@ -331,6 +329,24 @@ export default function AdminStaffPage() {
     const start = (currentPage - 1) * pageSize;
     return filteredStaff.slice(start, start + pageSize);
   }, [filteredStaff, currentPage, pageSize]);
+
+  const staffForCards = useMemo(() => {
+    return faculty.filter((staff) => {
+      const staffAcademicDepartmentIds = [
+        ...(Array.isArray(staff.managedDepartments) ? staff.managedDepartments.map((department) => department._id) : []),
+        staff.academicDepartment?._id || (staff.department?.type === "Academic" ? staff.department._id : ""),
+      ].filter(Boolean);
+      const staffServiceDepartmentId =
+        staff.serviceDepartment?._id || (staff.department?.type === "Service" ? staff.department._id : "");
+
+      const academicMatch =
+        academicFilter === "All" ||
+        staffAcademicDepartmentIds.includes(academicFilter);
+      const serviceMatch = serviceFilter === "All" || staffServiceDepartmentId === serviceFilter;
+
+      return academicMatch && serviceMatch;
+    });
+  }, [faculty, academicFilter, serviceFilter]);
 
   const exportCsv = () => {
     const rows = [
@@ -373,7 +389,7 @@ export default function AdminStaffPage() {
   );
 
   const staffSummary = useMemo(() => {
-    const nonDemoFilteredStaff = filteredStaff.filter((item) => !item.isDemoUser);
+    const nonDemoFilteredStaff = staffForCards.filter((item) => !item.isDemoUser);
     const totalStaff = nonDemoFilteredStaff.length;
     const activeStaff = nonDemoFilteredStaff.filter((item) => item.isActive !== false).length;
     const inactiveStaff = totalStaff - activeStaff;
@@ -390,7 +406,7 @@ export default function AdminStaffPage() {
       availableStaff,
       avgOpenIssues: totalStaff === 0 ? 0 : totalOpenIssues / totalStaff,
     };
-  }, [filteredStaff, activeIssueMap]);
+  }, [staffForCards, activeIssueMap]);
 
   const onEdit = (staff: Faculty) => {
     setEditingId(staff._id);
@@ -415,21 +431,44 @@ export default function AdminStaffPage() {
     });
   };
 
-  const onDelete = async (staff: Faculty) => {
-    if (!auth) return;
-    const confirmed = window.confirm(`Delete staff member ${staff.name}?`);
-    if (!confirmed) return;
+  const openStatusActionModal = (staff: Faculty) => {
+    setStatusActionTarget(staff);
+    setStatusActionMode(staff.isActive === false ? "activate" : "deactivate");
+  };
 
-    setDeletingId(staff._id);
+  const closeStatusActionModal = () => {
+    if (statusActionSubmitting) return;
+    setStatusActionTarget(null);
+    setStatusActionMode(null);
+  };
+
+  const submitStatusAction = async () => {
+    if (!auth || !statusActionTarget || !statusActionMode) return;
+
+    setStatusActionSubmitting(true);
+    const endpoint =
+      statusActionMode === "activate"
+        ? `/api/admin/users/${statusActionTarget._id}/activate`
+        : `/api/admin/users/${statusActionTarget._id}/deactivate`;
+
     try {
-      await authFetch(`/api/admin/staff/${staff._id}`, { method: "DELETE" }, auth.token);
-      showToast({ title: "Success", message: "Staff member deleted successfully", variant: "success" });
-      loadData();
+      await authFetch(endpoint, { method: "PATCH" }, auth.token);
+      showToast({
+        title: "Success",
+        message:
+          statusActionMode === "activate"
+            ? "Staff activated successfully"
+            : "Staff deactivated successfully",
+        variant: "success",
+      });
+      setStatusActionTarget(null);
+      setStatusActionMode(null);
+      loadData(true);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to delete staff";
-      showToast({ title: "Delete Failed", message, variant: "error" });
+      const message = err instanceof Error ? err.message : "Failed to update staff status";
+      showToast({ title: "Update Failed", message, variant: "error" });
     } finally {
-      setDeletingId(null);
+      setStatusActionSubmitting(false);
     }
   };
 
@@ -597,7 +636,7 @@ export default function AdminStaffPage() {
                 <Users className="h-4 w-4 text-slate-500" />
               </div>
               <p className="mt-2 text-2xl font-bold text-slate-900">{staffSummary.totalStaff}</p>
-              <p className="mt-1 text-xs text-slate-500">All registered staff accounts</p>
+              <p className="mt-1 text-xs text-slate-500">Based on academic and service filters</p>
             </article>
 
             <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
@@ -679,12 +718,11 @@ export default function AdminStaffPage() {
 
                 <select
                   value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value as "All" | "Active" | "Inactive")}
+                  onChange={(event) => setStatusFilter(event.target.value as "Active" | "Inactive")}
                   className="h-11 w-45 shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-teal-500"
                 >
-                  <option value="All">All Status</option>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
+                  <option value="Active">Active Staff</option>
+                  <option value="Inactive">Inactive Staff</option>
                 </select>
 
                 <select
@@ -699,6 +737,10 @@ export default function AdminStaffPage() {
                 </select>
               </div>
             </div>
+
+            <p className="mt-2 text-xs text-slate-500">
+              Active staff are shown by default. Choose Inactive Staff to review deactivated accounts.
+            </p>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {activeFilterChips.length > 0 ? (
@@ -799,9 +841,15 @@ export default function AdminStaffPage() {
                         })()}
                       </Td>
                       <Td>
-                        <span className="inline-flex items-center rounded-full bg-teal-600 px-3 py-1 text-xs font-semibold text-white">
-                          {staff.isActive === false ? "Inactive" : "Active"}
-                        </span>
+                        {staff.isActive === false ? (
+                          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+                            Inactive
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                            Active
+                          </span>
+                        )}
                         {staff.isDemoUser && process.env.NODE_ENV !== "production" ? (
                           <span className="ml-2 inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Test</span>
                         ) : null}
@@ -818,20 +866,25 @@ export default function AdminStaffPage() {
                           </a>
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
                             onClick={() => onEdit(staff)}
-                            title="Edit"
+                            disabled={staff.isActive === false}
+                            title={staff.isActive === false ? "Activate staff to edit details" : "Edit"}
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-rose-500 hover:bg-rose-50"
-                            onClick={() => onDelete(staff)}
-                            disabled={deletingId === staff._id}
-                            title="Delete"
+                            className={`inline-flex h-8 min-w-24 items-center justify-center whitespace-nowrap rounded-md border px-3 text-xs font-semibold ${
+                              staff.isActive === false
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                            }`}
+                            onClick={() => openStatusActionModal(staff)}
+                            disabled={statusActionSubmitting}
+                            title={staff.isActive === false ? "Activate" : "Deactivate"}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            {staff.isActive === false ? "Activate" : "Deactivate"}
                           </button>
                         </div>
                       </Td>
@@ -890,9 +943,75 @@ export default function AdminStaffPage() {
               </div>
             </div>
           )}
+
+          {statusActionTarget && statusActionMode ? (
+            <StatusActionModal
+              open
+              mode={statusActionMode}
+              staffName={statusActionTarget.name}
+              submitting={statusActionSubmitting}
+              onCancel={closeStatusActionModal}
+              onConfirm={submitStatusAction}
+            />
+          ) : null}
         </div>
       </AdminShell>
     </AdminProtected>
+  );
+}
+
+function StatusActionModal({
+  open,
+  mode,
+  staffName,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  mode: "activate" | "deactivate";
+  staffName: string;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+
+  const isDeactivate = mode === "deactivate";
+  const title = isDeactivate ? "Deactivate Staff" : "Activate Staff";
+  const message = isDeactivate
+    ? "Are you sure you want to deactivate this staff member? They will not be able to log in."
+    : "Activate this staff account?";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
+        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+        <p className="mt-2 text-sm text-slate-600">{message}</p>
+        <p className="mt-1 text-xs text-slate-500">Staff: {staffName}</p>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={submitting}
+            className={`h-10 rounded-lg px-4 text-sm font-semibold text-white disabled:opacity-60 ${
+              isDeactivate ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"
+            }`}
+          >
+            {submitting ? "Updating..." : isDeactivate ? "Deactivate" : "Activate"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

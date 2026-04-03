@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AdminProtected from "@/components/AdminProtected";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 import Link from "next/link";
@@ -70,6 +70,14 @@ type FeedbackSummary = {
   total: number;
 };
 
+type DashboardDataResponse = {
+  stats: Stats;
+  issues: AdminIssue[];
+  reports?: {
+    feedback?: FeedbackSummary;
+  };
+};
+
 type ActivityItem = {
   id: string;
   iconTone: "green" | "indigo" | "teal";
@@ -77,27 +85,32 @@ type ActivityItem = {
   timestamp: string;
 };
 
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 20000;
+const DASHBOARD_ISSUES_LIMIT = 80;
+const MAX_ACTIVITY_ITEMS = 5;
 
 export default function AdminDashboard() {
   const auth = useMemo(() => loadAuth(), []);
   const isSuperAdmin = auth?.user?.adminRole === "super_admin";
-  const cacheKey = "scit_admin_stats";
+  const cacheKey = "scit_admin_dashboard_data";
   const cacheTtlMs = 2 * 60 * 1000;
-  const cachedStats = readCachedStats(cacheKey, cacheTtlMs);
-  const [stats, setStats] = useState<Stats | null>(() => cachedStats || null);
-  const [issues, setIssues] = useState<AdminIssue[]>([]);
+  const cachedDashboard = readCachedDashboard(cacheKey, cacheTtlMs);
+  const [stats, setStats] = useState<Stats | null>(() => cachedDashboard?.stats || null);
+  const [issues, setIssues] = useState<AdminIssue[]>(() => cachedDashboard?.issues || []);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(() => !cachedStats);
+  const [loading, setLoading] = useState(() => !cachedDashboard);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-  const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary>({ averageRating: 0, total: 0 });
+  const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary>(
+    () => cachedDashboard?.feedbackSummary || { averageRating: 0, total: 0 }
+  );
+  const refreshTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     document.title = "Dashboard | CampusTracker Admin";
   }, []);
 
-  const loadDashboardData = (silent = false) => {
+  const loadDashboardData = useCallback(async (silent = false, signal?: AbortSignal) => {
     const activeAuth = loadAuth();
     if (!activeAuth) return;
 
@@ -105,58 +118,127 @@ export default function AdminDashboard() {
       setLoading(true);
     }
 
-    Promise.all([
-      authFetch("/api/admin/stats", { method: "GET" }, activeAuth.token),
-      authFetch("/api/admin/issues", { method: "GET" }, activeAuth.token),
-      authFetch("/api/admin/feedback/summary", { method: "GET" }, activeAuth.token),
-    ])
-      .then(([statsData, issuesData, feedbackData]) => {
+    try {
+      const data = await authFetch(
+        `/api/dashboard?issuesLimit=${DASHBOARD_ISSUES_LIMIT}&includeWorkers=0`,
+        { method: "GET", signal },
+        activeAuth.token
+      );
+
+      if (signal?.aborted) return;
+
+      const payload = data as DashboardDataResponse;
+      const statsData = payload?.stats || null;
+      const issuesData = Array.isArray(payload?.issues)
+        ? payload.issues.slice(0, DASHBOARD_ISSUES_LIMIT)
+        : [];
+      const feedback = payload?.reports?.feedback;
+
+      if (statsData) {
         setStats(statsData);
-        setIssues((issuesData.issues || []) as AdminIssue[]);
-        setFeedbackSummary({
-          averageRating: Number(feedbackData.averageRating || 0),
-          total: Number(feedbackData.total || 0),
-        });
-        setLastUpdatedAt(Date.now());
-        writeCachedStats(cacheKey, statsData);
-        setError(null);
-      })
-      .catch((err) => {
-        if (!silent) {
-          setError(err?.message || "Failed to load stats");
-        }
-      })
-      .finally(() => {
-        if (!silent) {
-          setLoading(false);
-        }
+      }
+
+      setIssues(issuesData);
+      setFeedbackSummary({
+        averageRating: Number(feedback?.averageRating || 0),
+        total: Number(feedback?.total || 0),
       });
-  };
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      loadDashboardData();
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [cacheKey, cacheTtlMs]);
-
-  useEffect(() => {
-    const activeAuth = loadAuth();
-    if (!activeAuth) return;
-
-    const intervalId = window.setInterval(() => {
-      loadDashboardData(true);
-    }, POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
+      setLastUpdatedAt(Date.now());
+      if (statsData) {
+        writeCachedDashboard(cacheKey, {
+          stats: statsData,
+          issues: issuesData,
+          feedbackSummary: {
+            averageRating: Number(feedback?.averageRating || 0),
+            total: Number(feedback?.total || 0),
+          },
+        });
+      }
+      setError(null);
+    } catch (err) {
+      if (signal?.aborted) return;
+      if (!silent) {
+        setError((err as { message?: string })?.message || "Failed to load stats");
+      }
+    } finally {
+      if (!silent && !signal?.aborted) {
+        setLoading(false);
+      }
+    }
   }, [cacheKey]);
 
-  const onRefreshNow = () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadDashboardData(false, controller.signal);
+
+    return () => controller.abort();
+  }, [loadDashboardData]);
+
+  useEffect(() => {
+    if (!auth) return;
+
+    let intervalId: number | null = null;
+
+    const runSilentRefresh = () => {
+      const controller = new AbortController();
+      void loadDashboardData(true, controller.signal);
+      return controller;
+    };
+
+    let activeController: AbortController | null = runSilentRefresh();
+
+    const startPolling = () => {
+      if (document.hidden || intervalId !== null) return;
+      intervalId = window.setInterval(() => {
+        activeController?.abort();
+        activeController = runSilentRefresh();
+      }, POLL_INTERVAL_MS);
+    };
+
+    const stopPolling = () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+      activeController?.abort();
+      activeController = null;
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        return;
+      }
+
+      activeController?.abort();
+      activeController = runSilentRefresh();
+      startPolling();
+    };
+
+    startPolling();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [auth, loadDashboardData]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        window.clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const onRefreshNow = useCallback(() => {
     setRefreshing(true);
-    loadDashboardData(true);
-    window.setTimeout(() => setRefreshing(false), 700);
-  };
+    const controller = new AbortController();
+    void loadDashboardData(true, controller.signal).finally(() => {
+      refreshTimeoutRef.current = window.setTimeout(() => setRefreshing(false), 500);
+    });
+  }, [loadDashboardData]);
 
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdatedAt) return "Not synced yet";
@@ -197,13 +279,16 @@ export default function AdminDashboard() {
     [stats, trendData]
   );
 
-  const prominentMetrics = metricCards.filter((card) => card.value > 0);
+  const prominentMetrics = useMemo(() => metricCards.filter((card) => card.value > 0), [metricCards]);
 
-  const needsAttention = {
-    unassigned: stats?.needsAttention?.unassigned ?? 0,
-    overdue: stats?.needsAttention?.overdue ?? 0,
-    recurring: stats?.needsAttention?.recurring ?? 0,
-  };
+  const needsAttention = useMemo(
+    () => ({
+      unassigned: stats?.needsAttention?.unassigned ?? 0,
+      overdue: stats?.needsAttention?.overdue ?? 0,
+      recurring: stats?.needsAttention?.recurring ?? 0,
+    }),
+    [stats]
+  );
 
   const hasAttentionItems = needsAttention.unassigned > 0 || needsAttention.overdue > 0 || needsAttention.recurring > 0;
 
@@ -211,19 +296,30 @@ export default function AdminDashboard() {
   const resolutionRate = totalIssueCount > 0 ? Math.round(((stats?.resolved ?? 0) / totalIssueCount) * 100) : 0;
   const assignedCoverage =
     totalIssueCount > 0
-      ? Math.round((issues.filter((issue) => Boolean(issue.assignedStaff?._id)).length / totalIssueCount) * 100)
+      ? Math.round(((stats?.assigned ?? 0) / totalIssueCount) * 100)
       : 0;
   const attentionLoad =
     totalIssueCount > 0
       ? Math.round(((needsAttention.unassigned + needsAttention.overdue) / totalIssueCount) * 100)
       : 0;
 
-  const directoryCards = [
-    { label: "Students", value: stats?.students ?? 0, href: "/admin/students", Icon: Users },
-    { label: "Staff", value: stats?.staff ?? 0, href: "/admin/staff", Icon: Users2 },
-    { label: "Departments", value: stats?.departments ?? 0, href: "/admin/departments", Icon: Building2 },
-    { label: "Faculty", value: stats?.faculty ?? 0, href: "/admin/staff", Icon: UserCheck },
-  ];
+  const directoryCards = useMemo(
+    () => [
+      { label: "Students", value: stats?.students ?? 0, href: "/admin/students", Icon: Users },
+      { label: "Staff", value: stats?.staff ?? 0, href: "/admin/staff", Icon: Users2 },
+      { label: "Departments", value: stats?.departments ?? 0, href: "/admin/departments", Icon: Building2 },
+      { label: "Faculty", value: stats?.faculty ?? 0, href: "/admin/staff", Icon: UserCheck },
+    ],
+    [stats]
+  );
+
+  const issueTimestampById = useMemo(() => {
+    const map = new Map<string, number | null>();
+    issues.forEach((issue) => {
+      map.set(issue._id, toTimestamp(issue.updatedAt || issue.createdAt));
+    });
+    return map;
+  }, [issues]);
 
   const topResolver = useMemo(() => {
     const now = new Date();
@@ -247,7 +343,7 @@ export default function AdminDashboard() {
     return issues
       .slice()
       .sort((a, b) => (toTimestamp(b.updatedAt || b.createdAt) || 0) - (toTimestamp(a.updatedAt || a.createdAt) || 0))
-      .slice(0, 5)
+      .slice(0, MAX_ACTIVITY_ITEMS)
       .map((issue) => {
         const issueTitle = issue.title || "Untitled issue";
         const eventTime = toTimestamp(issue.updatedAt || issue.createdAt);
@@ -288,8 +384,7 @@ export default function AdminDashboard() {
     const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
 
     for (const item of recentActivity) {
-      const source = issues.find((issue) => issue._id === item.id);
-      const ts = toTimestamp(source?.updatedAt || source?.createdAt);
+      const ts = issueTimestampById.get(item.id) ?? null;
       if (!ts) {
         older.push(item);
       } else if (ts >= todayStart) {
@@ -302,7 +397,7 @@ export default function AdminDashboard() {
     }
 
     return { today, yesterday, older };
-  }, [issues, recentActivity]);
+  }, [issueTimestampById, recentActivity]);
 
   const exportMonthlyReport = (format: "csv" | "pdf") => {
     if (!stats) return;
@@ -587,7 +682,7 @@ function getMinutesSince(timestampMs: number) {
   return Math.max(0, Math.floor((Date.now() - timestampMs) / 60000));
 }
 
-function StatCard({
+const StatCard = memo(function StatCard({
   label,
   value,
   tone,
@@ -631,9 +726,9 @@ function StatCard({
       </div>
     </Link>
   );
-}
+});
 
-function QuickAction({
+const QuickAction = memo(function QuickAction({
   href,
   label,
   Icon,
@@ -684,7 +779,7 @@ function QuickAction({
       ) : null}
     </Link>
   );
-}
+});
 
 function getMonthlyTrend(issues: AdminIssue[], predicate: (issue: AdminIssue) => boolean): TrendMeta {
   const now = Date.now();
@@ -719,7 +814,7 @@ function getMonthlyTrend(issues: AdminIssue[], predicate: (issue: AdminIssue) =>
   return { direction: "flat", delta, label: "same as last month", className: "text-slate-500" };
 }
 
-function ActivityGroup({
+const ActivityGroup = memo(function ActivityGroup({
   title,
   items,
 }: {
@@ -753,7 +848,7 @@ function ActivityGroup({
       </ul>
     </div>
   );
-}
+});
 
 function toTimestamp(value?: string) {
   if (!value) return null;
@@ -774,7 +869,7 @@ function formatRelativeTime(timestamp: number | null) {
   return `${days}d ago`;
 }
 
-function ActivityDot({ tone }: { tone: "teal" | "indigo" | "green" }) {
+const ActivityDot = memo(function ActivityDot({ tone }: { tone: "teal" | "indigo" | "green" }) {
   const toneClass = {
     teal: "bg-teal-100 text-teal-700",
     indigo: "bg-indigo-100 text-indigo-700",
@@ -785,26 +880,46 @@ function ActivityDot({ tone }: { tone: "teal" | "indigo" | "green" }) {
     tone === "green" ? <CheckCircle2 className="h-4 w-4" /> : tone === "indigo" ? <UserCheck className="h-4 w-4" /> : <FileText className="h-4 w-4" />;
 
   return <span className={`mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full ${toneClass[tone]}`}>{icon}</span>;
-}
+});
 
-function readCachedStats(key: string, ttlMs: number) {
+function readCachedDashboard(key: string, ttlMs: number) {
   if (typeof window === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { timestamp: number; stats: Stats };
+    const parsed = JSON.parse(raw) as {
+      timestamp: number;
+      stats: Stats;
+      issues: AdminIssue[];
+      feedbackSummary: FeedbackSummary;
+    };
     if (!parsed.timestamp || !parsed.stats) return null;
     if (Date.now() - parsed.timestamp > ttlMs) return null;
-    return parsed.stats;
+    return {
+      stats: parsed.stats,
+      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+      feedbackSummary: parsed.feedbackSummary || { averageRating: 0, total: 0 },
+    };
   } catch {
     return null;
   }
 }
 
-function writeCachedStats(key: string, stats: Stats) {
+function writeCachedDashboard(
+  key: string,
+  payload: { stats: Stats; issues: AdminIssue[]; feedbackSummary: FeedbackSummary }
+) {
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), stats }));
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        timestamp: Date.now(),
+        stats: payload.stats,
+        issues: payload.issues,
+        feedbackSummary: payload.feedbackSummary,
+      })
+    );
   } catch {
     // ignore storage failures
   }

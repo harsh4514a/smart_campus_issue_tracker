@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -53,6 +53,46 @@ export default function StudentIssuesPage() {
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackByIssueId, setFeedbackByIssueId] = useState<Record<string, FeedbackRecord | null>>({});
+
+  useEffect(() => {
+    if (!auth) return;
+
+    const resolvedIssueIds = issues
+      .filter((issue) => issue.status === "Resolved")
+      .map((issue) => issue._id);
+
+    const unresolvedFeedbackIds = resolvedIssueIds.filter((issueId) => feedbackByIssueId[issueId] === undefined);
+    if (unresolvedFeedbackIds.length === 0) return;
+
+    let cancelled = false;
+
+    void Promise.all(
+      unresolvedFeedbackIds.map(async (issueId) => {
+        try {
+          const data = await authFetch(`/api/issues/${issueId}/feedback`, { method: "GET" }, auth.token);
+          const feedback = data.feedback as FeedbackRecord | null;
+          return { issueId, feedback: feedback || null };
+        } catch {
+          return { issueId, feedback: null };
+        }
+      })
+    ).then((results) => {
+      if (cancelled) return;
+
+      setFeedbackByIssueId((prev) => {
+        const next = { ...prev };
+        for (const result of results) {
+          next[result.issueId] = result.feedback;
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, issues, feedbackByIssueId]);
 
   const filteredIssues = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -102,6 +142,9 @@ export default function StudentIssuesPage() {
       if (existing) {
         setFeedbackRating(existing.rating || 5);
         setFeedbackComment(existing.comment || "");
+        setFeedbackByIssueId((prev) => ({ ...prev, [issue._id]: existing }));
+      } else {
+        setFeedbackByIssueId((prev) => ({ ...prev, [issue._id]: null }));
       }
     } catch {
       // keep modal editable even if existing feedback fetch fails
@@ -115,7 +158,8 @@ export default function StudentIssuesPage() {
     setFeedbackError(null);
 
     try {
-      await authFetch(
+      const currentIssueId = feedbackIssue._id;
+      const data = await authFetch(
         `/api/issues/${feedbackIssue._id}/feedback`,
         {
           method: "POST",
@@ -123,6 +167,15 @@ export default function StudentIssuesPage() {
         },
         auth.token
       );
+      const savedFeedback = data.feedback as FeedbackRecord | null;
+      setFeedbackByIssueId((prev) => ({
+        ...prev,
+        [currentIssueId]:
+          savedFeedback || {
+            rating: feedbackRating,
+            comment: feedbackComment,
+          },
+      }));
       setFeedbackIssue(null);
     } catch (err) {
       setFeedbackError(err instanceof Error ? err.message : "Failed to submit feedback");
@@ -195,6 +248,7 @@ export default function StudentIssuesPage() {
                   <IssueCard
                     key={issue._id}
                     issue={issue}
+                    feedback={feedbackByIssueId[issue._id] ?? null}
                     deleting={deletingId === issue._id}
                     onDelete={() => handleDelete(issue._id)}
                     onRateResolution={() => openFeedbackModal(issue)}
@@ -265,15 +319,19 @@ export default function StudentIssuesPage() {
 
 function IssueCard({
   issue,
+  feedback,
   deleting,
   onDelete,
   onRateResolution,
 }: {
   issue: Issue;
+  feedback: FeedbackRecord | null;
   deleting: boolean;
   onDelete: () => void;
   onRateResolution: () => void;
 }) {
+  const rating = normalizeRating(feedback?.rating);
+
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -320,7 +378,8 @@ function IssueCard({
               onClick={onRateResolution}
               className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50"
             >
-              <Star size={14} /> Rate
+              {rating > 0 ? <InlineRatingStars rating={rating} /> : <Star size={14} />}
+              {rating > 0 ? `Rated ${rating}/5` : "Rate"}
             </button>
           ) : null}
         </div>
@@ -420,6 +479,28 @@ function OverdueBadge() {
       Overdue
     </span>
   );
+}
+
+function InlineRatingStars({ rating }: { rating: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`Rated ${rating} out of 5`}>
+      {[1, 2, 3, 4, 5].map((value) => (
+        <Star
+          key={value}
+          size={12}
+          className={value <= rating ? "text-amber-500" : "text-slate-300"}
+          fill={value <= rating ? "currentColor" : "none"}
+        />
+      ))}
+    </span>
+  );
+}
+
+function normalizeRating(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  const rounded = Math.round(value);
+  if (rounded < 1 || rounded > 5) return 0;
+  return rounded;
 }
 
 function getInitials(value: string) {

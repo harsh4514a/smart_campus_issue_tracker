@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AdminProtected from "@/components/AdminProtected";
 import AdminShell from "@/components/admin/AdminShell";
 import { authFetch, loadAuth } from "@/lib/client-auth";
@@ -57,12 +57,20 @@ type Issue = {
 type DateRangeFilter = "All" | "7d" | "30d" | "90d";
 type TableSort = "date_desc" | "date_asc" | "status" | "department" | "priority";
 
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 20000;
 const REFERENCE_TIMESTAMP = Date.now();
+const REPORTS_ISSUES_LIMIT = 400;
 
 type FeedbackSummary = {
   averageRating: number;
   total: number;
+};
+
+type DashboardDataResponse = {
+  issues?: Issue[];
+  reports?: {
+    feedback?: FeedbackSummary;
+  };
 };
 
 export default function AdminReportsPage() {
@@ -131,7 +139,7 @@ export default function AdminReportsPage() {
     });
   }, [departmentFilter, endDate, issues, startDate]);
 
-  const load = (silent = false) => {
+  const load = useCallback(async (silent = false, signal?: AbortSignal) => {
     const auth = loadAuth();
     if (!auth) return;
 
@@ -139,48 +147,88 @@ export default function AdminReportsPage() {
       setLoading(true);
     }
 
-    Promise.all([
-      authFetch("/api/admin/issues", { method: "GET" }, auth.token),
-      authFetch("/api/admin/feedback/summary", { method: "GET" }, auth.token),
-    ])
-      .then(([data, feedback]) => {
-        setIssues((data.issues || []) as Issue[]);
-        setFeedbackSummary({
-          averageRating: Number(feedback.averageRating || 0),
-          total: Number(feedback.total || 0),
-        });
-        setError(null);
-      })
-      .catch((err) => {
-        if (!silent) {
-          setError(err instanceof Error ? err.message : "Failed to load reports");
-        }
-      })
-      .finally(() => {
-        if (!silent) {
-          setLoading(false);
-        }
+    try {
+      const data = await authFetch(
+        `/api/dashboard?issuesLimit=${REPORTS_ISSUES_LIMIT}&includeWorkers=0`,
+        { method: "GET", signal },
+        auth.token
+      );
+
+      if (signal?.aborted) return;
+
+      const payload = data as DashboardDataResponse;
+      const feedback = payload?.reports?.feedback;
+
+      setIssues(Array.isArray(payload?.issues) ? payload.issues.slice(0, REPORTS_ISSUES_LIMIT) : []);
+      setFeedbackSummary({
+        averageRating: Number(feedback?.averageRating || 0),
+        total: Number(feedback?.total || 0),
       });
-  };
+      setError(null);
+    } catch (err) {
+      if (signal?.aborted) return;
+      if (!silent) {
+        setError(err instanceof Error ? err.message : "Failed to load reports");
+      }
+    } finally {
+      if (!silent && !signal?.aborted) {
+        setLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      load();
-    }, 0);
+    const controller = new AbortController();
+    void load(false, controller.signal);
 
-    return () => window.clearTimeout(timeoutId);
-  }, []);
+    return () => controller.abort();
+  }, [load]);
 
   useEffect(() => {
     const auth = loadAuth();
     if (!auth) return;
 
-    const intervalId = window.setInterval(() => {
-      load(true);
-    }, POLL_INTERVAL_MS);
+    let intervalId: number | null = null;
+    let activeController: AbortController | null = null;
 
-    return () => window.clearInterval(intervalId);
-  }, []);
+    const runSilentRefresh = () => {
+      activeController?.abort();
+      activeController = new AbortController();
+      void load(true, activeController.signal);
+    };
+
+    const startPolling = () => {
+      if (document.hidden || intervalId !== null) return;
+      intervalId = window.setInterval(runSilentRefresh, POLL_INTERVAL_MS);
+    };
+
+    const stopPolling = () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+      activeController?.abort();
+      activeController = null;
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        return;
+      }
+      runSilentRefresh();
+      startPolling();
+    };
+
+    runSilentRefresh();
+    startPolling();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [load]);
 
   const summary = useMemo(() => {
     const total = scopedIssues.length;
@@ -426,16 +474,16 @@ export default function AdminReportsPage() {
     return chips;
   }, [categoryFilter, dateRangeFilter, departmentFilter, statusFilter, tableSearch]);
 
-  const clearFilterChip = (key: "status" | "department" | "category" | "dateRange" | "search") => {
+  const clearFilterChip = useCallback((key: "status" | "department" | "category" | "dateRange" | "search") => {
     if (key === "status") setStatusFilter("All");
     if (key === "department") setDepartmentFilter("All");
     if (key === "category") setCategoryFilter("All");
     if (key === "dateRange") setDateRangeFilter("All");
     if (key === "search") setTableSearch("");
     setCurrentPage(1);
-  };
+  }, []);
 
-  const resetAllFilters = () => {
+  const resetAllFilters = useCallback(() => {
     const now = new Date();
     setStartDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
     setEndDate(new Date().toISOString().slice(0, 10));
@@ -446,7 +494,7 @@ export default function AdminReportsPage() {
     setTableSearch("");
     setTableSort("date_desc");
     setCurrentPage(1);
-  };
+  }, []);
 
   return (
     <AdminProtected>
@@ -920,14 +968,14 @@ export default function AdminReportsPage() {
                       <select
                         value={String(pageSize)}
                         onChange={(event) => {
-                          setPageSize(Number(event.target.value));
+                          const nextPageSize = Number(event.target.value);
+                          setPageSize(nextPageSize > 20 ? 20 : nextPageSize);
                           setCurrentPage(1);
                         }}
                         className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700"
                       >
                         <option value="10">10 / page</option>
                         <option value="20">20 / page</option>
-                        <option value="50">50 / page</option>
                       </select>
 
                       <button
@@ -963,7 +1011,7 @@ export default function AdminReportsPage() {
   );
 }
 
-function SummaryCard({
+const SummaryCard = memo(function SummaryCard({
   label,
   value,
   tone,
@@ -1004,22 +1052,22 @@ function SummaryCard({
       )}
     </div>
   );
-}
+});
 
-function ChartCard({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+const ChartCard = memo(function ChartCard({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <section className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:scale-[1.01] hover:shadow-md ${className}`}>
       <h2 className="mb-3 text-lg font-semibold text-slate-900">{title}</h2>
       {children}
     </section>
   );
-}
+});
 
-function EmptyChartMessage({ message }: { message: string }) {
+const EmptyChartMessage = memo(function EmptyChartMessage({ message }: { message: string }) {
   return <div className="flex h-full items-center justify-center text-sm text-slate-500">{message}</div>;
-}
+});
 
-function FilterSelect({
+const FilterSelect = memo(function FilterSelect({
   label,
   value,
   onChange,
@@ -1046,9 +1094,9 @@ function FilterSelect({
       </select>
     </label>
   );
-}
+});
 
-function StatusBadge({ status, isAssigned }: { status: IssueStatus; isAssigned: boolean }) {
+const StatusBadge = memo(function StatusBadge({ status, isAssigned }: { status: IssueStatus; isAssigned: boolean }) {
   if (status === "Rejected") {
     return <Badge label="Rejected" className="bg-red-100 text-red-700" />;
   }
@@ -1066,9 +1114,9 @@ function StatusBadge({ status, isAssigned }: { status: IssueStatus; isAssigned: 
   }
 
   return <Badge label="Pending" className="bg-amber-100 text-amber-700" />;
-}
+});
 
-function PriorityBadge({ priority }: { priority: IssuePriority | null }) {
+const PriorityBadge = memo(function PriorityBadge({ priority }: { priority: IssuePriority | null }) {
   if (!priority) {
     return <Badge label="—" className="bg-slate-100 text-slate-600" />;
   }
@@ -1086,11 +1134,11 @@ function PriorityBadge({ priority }: { priority: IssuePriority | null }) {
   }
 
   return <Badge label={priority} className="bg-red-100 text-red-700" />;
-}
+});
 
-function Badge({ label, className }: { label: string; className: string }) {
+const Badge = memo(function Badge({ label, className }: { label: string; className: string }) {
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${className}`}>{label}</span>;
-}
+});
 
 function IssueDetailModal({ issue, onClose }: { issue: Issue; onClose: () => void }) {
   const isAssigned = Boolean(issue.assignedStaff?._id);
@@ -1176,7 +1224,7 @@ function LoadingSkeleton() {
   );
 }
 
-function IconActionButton({
+const IconActionButton = memo(function IconActionButton({
   label,
   onClick,
   children,
@@ -1196,19 +1244,19 @@ function IconActionButton({
       {children}
     </button>
   );
-}
+});
 
-function Th({ children }: { children: React.ReactNode }) {
+const Th = memo(function Th({ children }: { children: React.ReactNode }) {
   return <th className="px-4 py-3 text-left text-sm font-semibold text-slate-600">{children}</th>;
-}
+});
 
-function Td({ children, className = "", colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
+const Td = memo(function Td({ children, className = "", colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
   return (
     <td colSpan={colSpan} className={`px-4 py-3 text-sm text-slate-600 ${className}`}>
       {children}
     </td>
   );
-}
+});
 
 function statsNumber(value: number) {
   return new Intl.NumberFormat().format(value);

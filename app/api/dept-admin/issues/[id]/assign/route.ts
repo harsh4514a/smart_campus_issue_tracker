@@ -5,6 +5,7 @@ import User from "@/models/User";
 import { canDeptAdminAccessIssue, requireDeptAdmin } from "@/lib/dept-admin";
 import { createAuditLog } from "@/lib/audit";
 import { deleteFromCacheByPrefix } from "@/lib/server-cache";
+import { sendIssueEventEmail } from "@/lib/issue-mailer";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -88,6 +89,29 @@ export async function PATCH(request: Request, context: RouteContext) {
     .populate("academicDepartment", "name type")
     .populate("serviceDepartment", "name type")
     .lean();
+
+  try {
+    if (staff.email) {
+      await sendIssueEventEmail({
+        event: "assigned",
+        to: [staff.email],
+        issue: {
+          id: String(issue._id),
+          title: issue.title,
+          department:
+            (updatedIssue?.serviceDepartment as { name?: string } | null)?.name ||
+            (updatedIssue?.academicDepartment as { name?: string } | null)?.name ||
+            (updatedIssue?.department as { name?: string } | null)?.name ||
+            null,
+          priority: updatedIssue?.priority,
+          status: updatedIssue?.status,
+        },
+        actorName: auth.user.name,
+      });
+    }
+  } catch (mailErr) {
+    console.error("Dept-admin assign email error", mailErr);
+  }
 
   deleteFromCacheByPrefix("dept-admin:dashboard:");
   deleteFromCacheByPrefix("dept-admin:workers:");

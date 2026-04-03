@@ -30,6 +30,30 @@ export default function StudentProfilePage() {
 
   const [fullName, setFullName] = useState(displayName);
   const [saving, setSaving] = useState(false);
+  const [baselineProfile, setBaselineProfile] = useState(() => ({
+    name: normalizeName(displayName),
+    studentId: defaultStudentId.trim().toUpperCase(),
+    institute: (auth?.user.institute || "").trim(),
+    course: defaultCourse.trim().toUpperCase(),
+    mobileNumber: normalizeMobile(auth?.user.mobileNumber || ""),
+  }));
+
+  const normalizedCurrentProfile = useMemo(() => ({
+    name: normalizeName(fullName),
+    studentId: studentId.trim().toUpperCase(),
+    institute: institute.trim(),
+    course: course.trim().toUpperCase(),
+    mobileNumber: normalizeMobile(mobileNumber),
+  }), [course, fullName, institute, mobileNumber, studentId]);
+
+  const hasProfileChanges = useMemo(() => {
+    if (normalizedCurrentProfile.name !== baselineProfile.name) return true;
+    if (normalizedCurrentProfile.institute !== baselineProfile.institute) return true;
+    if (normalizedCurrentProfile.course !== baselineProfile.course) return true;
+    if (normalizedCurrentProfile.mobileNumber !== baselineProfile.mobileNumber) return true;
+    if (showStudentIdField && normalizedCurrentProfile.studentId !== baselineProfile.studentId) return true;
+    return false;
+  }, [baselineProfile, normalizedCurrentProfile, showStudentIdField]);
 
   useEffect(() => {
     if (!auth) return;
@@ -51,6 +75,13 @@ export default function StudentProfilePage() {
         setInstitute(liveInstitute);
         setCourse(liveCourse);
         setMobileNumber(liveMobile);
+        setBaselineProfile({
+          name: normalizeName(liveName),
+          studentId: liveStudentId,
+          institute: liveInstitute.trim(),
+          course: liveCourse,
+          mobileNumber: normalizeMobile(liveMobile),
+        });
 
         saveAuth({
           ...auth,
@@ -86,13 +117,18 @@ export default function StudentProfilePage() {
       return;
     }
 
-    setSaving(true);
+    if (!hasProfileChanges) {
+      showToast({ message: "No profile changes to save.", variant: "info" });
+      return;
+    }
 
     const trimmedStudentId = studentId.trim().toUpperCase();
     const trimmedInstitute = institute.trim();
     const trimmedCourse = course.trim().toUpperCase();
     const trimmedMobile = mobileNumber.trim();
-    const normalizedMobile = trimmedMobile.replace(/\s+/g, "");
+    const normalizedMobile = normalizeMobile(trimmedMobile);
+
+    setSaving(true);
 
     if (trimmedInstitute.length > 120) {
       showToast({ message: "Institute name is too long.", variant: "error" });
@@ -144,6 +180,13 @@ export default function StudentProfilePage() {
       setInstitute(updatedInstitute || "");
       setCourse((updatedCourse || trimmedCourse).toUpperCase());
       setMobileNumber(updatedMobile || "");
+      setBaselineProfile({
+        name: normalizeName(updatedName),
+        studentId: (updatedStudentId || trimmedStudentId).toUpperCase(),
+        institute: (updatedInstitute || "").trim(),
+        course: (updatedCourse || trimmedCourse).toUpperCase(),
+        mobileNumber: normalizeMobile(updatedMobile || ""),
+      });
       saveAuth({
         ...auth,
         user: {
@@ -186,22 +229,23 @@ export default function StudentProfilePage() {
         />
 
         <div className="flex-1 flex flex-col">
-          <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur px-6 py-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur pl-16 pr-4 py-4 sm:px-6 sm:py-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-slate-900">Profile</h1>
+              <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Profile</h1>
               <p className="text-sm text-slate-500">Manage your account settings</p>
             </div>
             <StudentUserActions
               name={displayName}
               email={userEmail}
               initials={userInitials}
+              className="w-full justify-end sm:w-auto"
               onSignOut={handleSignOut}
             />
           </header>
 
-          <main className="flex-1 overflow-y-auto p-6">
-            <div className="mx-auto max-w-2xl space-y-6">
-              <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="mx-auto max-w-2xl space-y-4 sm:space-y-6">
+              <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900">Personal Information</h2>
@@ -209,7 +253,7 @@ export default function StudentProfilePage() {
                   </div>
                 </div>
 
-                <div className="mt-6 flex flex-wrap items-center gap-4">
+                <div className="mt-5 flex flex-col items-start gap-3 sm:mt-6 sm:flex-row sm:items-center sm:gap-4">
                   <div className="h-14 w-14 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center font-semibold">
                     {userInitials}
                   </div>
@@ -224,8 +268,9 @@ export default function StudentProfilePage() {
 
                 <div className="mt-6 space-y-4">
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Email</label>
+                    <label htmlFor="profile-email" className="text-sm font-medium text-slate-700">Email</label>
                     <input
+                      id="profile-email"
                       type="email"
                       value={userEmail}
                       disabled
@@ -235,20 +280,23 @@ export default function StudentProfilePage() {
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Full Name</label>
+                    <label htmlFor="profile-full-name" className="text-sm font-medium text-slate-700">Full Name</label>
                     <input
+                      id="profile-full-name"
                       type="text"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       disabled={saving}
+                      maxLength={80}
                       className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     />
                   </div>
 
                   {showStudentIdField ? (
                     <div>
-                      <label className="text-sm font-medium text-slate-700">Student ID</label>
+                      <label htmlFor="profile-student-id" className="text-sm font-medium text-slate-700">Student ID</label>
                       <input
+                        id="profile-student-id"
                         type="text"
                         value={studentId}
                         disabled
@@ -258,19 +306,22 @@ export default function StudentProfilePage() {
                   ) : null}
 
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Institute</label>
+                    <label htmlFor="profile-institute" className="text-sm font-medium text-slate-700">Institute</label>
                     <input
+                      id="profile-institute"
                       type="text"
                       value={institute}
                       onChange={(e) => setInstitute(e.target.value)}
                       disabled={saving}
+                      maxLength={120}
                       className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     />
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Course</label>
+                    <label htmlFor="profile-course" className="text-sm font-medium text-slate-700">Course</label>
                     <input
+                      id="profile-course"
                       type="text"
                       value={course}
                       disabled
@@ -279,40 +330,44 @@ export default function StudentProfilePage() {
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-slate-700">Mobile Number</label>
+                    <label htmlFor="profile-mobile" className="text-sm font-medium text-slate-700">Mobile Number</label>
                     <input
+                      id="profile-mobile"
                       type="tel"
                       value={mobileNumber}
                       onChange={(e) => setMobileNumber(e.target.value)}
                       disabled={saving}
+                      inputMode="tel"
+                      autoComplete="tel"
+                      maxLength={16}
                       className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     />
                   </div>
                 </div>
 
-                <div className="mt-6 flex flex-wrap items-center gap-3">
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
                   <button
                     type="button"
                     onClick={handleSave}
-                    disabled={saving}
-                    className="inline-flex items-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={saving || !hasProfileChanges}
+                    className="inline-flex w-full sm:w-auto justify-center items-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {saving ? "Saving..." : "Save Changes"}
+                    {saving ? "Saving..." : hasProfileChanges ? "Save Changes" : "No Changes"}
                   </button>
                 </div>
               </section>
 
-              <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+              <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
                 <h2 className="text-lg font-semibold text-slate-900">Account Information</h2>
                 <div className="mt-5 space-y-4">
-                  <div className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3">
+                  <div className="flex flex-col items-start gap-2 rounded-2xl border border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-slate-700">Account Status</p>
                       <p className="text-xs text-slate-500">Your account is active</p>
                     </div>
-                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Active</span>
+                    <span className="self-start rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 sm:self-auto">Active</span>
                   </div>
-                  <div className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3">
+                  <div className="flex flex-col items-start gap-2 rounded-2xl border border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-slate-700">Member Since</p>
                       <p className="text-xs text-slate-500">{memberSince}</p>
@@ -356,4 +411,12 @@ function getCourseFromEmail(email: string) {
   if (localPart.includes("ce")) return "CE";
   if (localPart.includes("it")) return "IT";
   return "";
+}
+
+function normalizeName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeMobile(value: string) {
+  return value.replace(/\s+/g, "").trim();
 }

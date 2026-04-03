@@ -225,18 +225,28 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   try {
     const { id } = await context.params;
-    const staff = await User.findOneAndDelete({
-      _id: id,
-      role: "staff",
-    });
+    const staff = await User.findOneAndUpdate(
+      {
+        _id: id,
+        role: "staff",
+      },
+      {
+        $set: {
+          isActive: false,
+          deactivatedAt: new Date(),
+          deactivatedBy: auth.user._id,
+        },
+      },
+      { new: true }
+    );
 
     if (!staff) {
       return NextResponse.json({ message: "Staff member not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ message: "Staff member deleted" });
+    return NextResponse.json({ message: "Staff member deactivated successfully" });
   } catch (error) {
-    console.error("Delete staff error", error);
+    console.error("Deactivate staff error", error);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

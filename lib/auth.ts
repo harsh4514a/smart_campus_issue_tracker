@@ -22,6 +22,7 @@ const DEMO_EMAILS = new Set(
     process.env.DEMO_STUDENT_EMAIL || "demo.student@charusat.edu.in",
     process.env.DEMO_STAFF_EMAIL || "demo.worker@charusat.ac.in",
     process.env.DEMO_ADMIN_EMAIL || "demo.admin@CampusTrackerer.com",
+    process.env.DEMO_DEPT_ADMIN_EMAIL || "demo.deptadmin@charusat.ac.in",
   ].map((email) => email.trim().toLowerCase())
 );
 
@@ -56,6 +57,13 @@ export async function authenticateRequest(
 
     if (!user) {
       return new Response(JSON.stringify({ message: "User not found" }), { status: 401 });
+    }
+
+    if (user.isActive === false) {
+      return new Response(
+        JSON.stringify({ message: "Your account is deactivated. Contact admin." }),
+        { status: 403 }
+      );
     }
 
     const method = request.method.toUpperCase();

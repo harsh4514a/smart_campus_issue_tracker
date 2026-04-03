@@ -12,6 +12,7 @@ import { useToast } from "@/components/ToastProvider";
 import { Info, UploadCloud } from "lucide-react";
 
 const areaTypes = ["Classroom", "Lab", "Office", "Corridor", "Washroom", "Common Area", "Other"];
+const fallbackServiceCategories = ["Cleaning", "Electrical", "IT Support", "Network / Internet", "Plumbing", "Furniture", "Other"];
 const categoryExamples: Record<string, string> = {
   Cleaning: "Examples: Dirty classroom, uncleared dustbin, washroom cleanliness",
   Electrical: "Examples: Fan not working, lights off, AC power issue",
@@ -61,6 +62,13 @@ export default function StudentReportPage() {
     return departments.filter((department) => department.type === "Academic");
   }, [departments]);
 
+  const availableCategories = useMemo(() => {
+    if (serviceCategories.length > 0) return serviceCategories;
+    return fallbackServiceCategories;
+  }, [serviceCategories]);
+
+  const usingFallbackCategories = !departmentsLoading && serviceCategories.length === 0;
+
   useEffect(() => {
     if (!auth) return;
 
@@ -100,8 +108,30 @@ export default function StudentReportPage() {
       return;
     }
 
-    if (academicDepartments.length === 0 || serviceCategories.length === 0) {
+    if (academicDepartments.length === 0 || availableCategories.length === 0) {
       showToast({ message: "Issue categories are unavailable right now. Please try again shortly.", variant: "error" });
+      return;
+    }
+
+    if (!form.category) {
+      showToast({ message: "Please select a category.", variant: "error" });
+      return;
+    }
+
+    if (!form.departmentId) {
+      showToast({ message: "Please select an academic department.", variant: "error" });
+      return;
+    }
+
+    const trimmedTitle = form.title.trim();
+    if (trimmedTitle.length < 5 || trimmedTitle.length > 120) {
+      showToast({ message: "Title must be between 5 and 120 characters.", variant: "error" });
+      return;
+    }
+
+    const trimmedDescription = form.description.trim();
+    if (trimmedDescription.length > 1000) {
+      showToast({ message: "Description must be 1000 characters or fewer.", variant: "error" });
       return;
     }
 
@@ -124,8 +154,8 @@ export default function StudentReportPage() {
         {
           method: "POST",
           body: JSON.stringify({
-            title: form.title.trim(),
-            description: form.description.trim() || undefined,
+            title: trimmedTitle,
+            description: trimmedDescription || undefined,
             category: form.category,
             location,
             departmentId: form.departmentId,
@@ -154,15 +184,16 @@ export default function StudentReportPage() {
           roleLabel={userRoleLabel}
         />
         <div className="flex-1 flex flex-col">
-          <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur px-6 py-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur pl-16 pr-4 py-4 sm:px-6 sm:py-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-slate-500">Report an Issue</p>
-              <h1 className="text-2xl font-semibold text-slate-900">Fill out the form to raise a campus issue.</h1>
+              <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Fill out the form to raise a campus issue.</h1>
             </div>
             <StudentUserActions
               name={userName}
               email={userEmail}
               initials={userInitials}
+              className="w-full justify-end sm:w-auto"
               onSignOut={() => {
                 clearAuth();
                 router.replace("/login");
@@ -170,13 +201,18 @@ export default function StudentReportPage() {
             />
           </header>
 
-          <main className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-hide">
             <div className="mx-auto max-w-3xl">
-              <section className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm">
-                <form className="space-y-6" onSubmit={onSubmit}>
+              <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+                <form className="space-y-5 sm:space-y-6" onSubmit={onSubmit}>
                   {departmentsError ? (
                     <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                       {departmentsError}
+                    </div>
+                  ) : null}
+                  {usingFallbackCategories ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                      Service categories are temporarily unavailable, so default categories are shown.
                     </div>
                   ) : null}
 
@@ -203,7 +239,7 @@ export default function StudentReportPage() {
                         <option value="" disabled>
                           {departmentsLoading ? "Loading categories..." : "Select a category"}
                         </option>
-                        {serviceCategories.map((category) => (
+                        {availableCategories.map((category) => (
                           <option key={category} value={category}>
                             {category}
                           </option>
@@ -222,6 +258,8 @@ export default function StudentReportPage() {
                         value={form.title}
                         onChange={(e) => handleChange("title")(e.target.value)}
                         required
+                        minLength={5}
+                        maxLength={120}
                         className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                         placeholder="Brief description of the issue"
                       />
@@ -234,6 +272,7 @@ export default function StudentReportPage() {
                         value={form.description}
                         onChange={(e) => handleChange("description")(e.target.value)}
                         rows={4}
+                        maxLength={1000}
                         className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                         placeholder="Provide more details about the issue..."
                       />
@@ -274,6 +313,7 @@ export default function StudentReportPage() {
                         description="Enter class or room number"
                         placeholder="e.g., 101"
                         required
+                        maxLength={50}
                         value={form.room}
                         onChange={handleChange("room")}
                       />
@@ -302,6 +342,7 @@ export default function StudentReportPage() {
                             value={customArea}
                             onChange={(e) => setCustomArea(e.target.value)}
                             required
+                            maxLength={60}
                             placeholder="Specify area..."
                             className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                           />
@@ -348,14 +389,14 @@ export default function StudentReportPage() {
                   <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <Link
                       href="/student/dashboard"
-                      className="inline-flex items-center justify-center rounded-full border border-slate-200 px-8 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                      className="inline-flex w-full sm:w-auto items-center justify-center rounded-full border border-slate-200 px-8 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
                     >
                       Cancel
                     </Link>
                     <button
                       type="submit"
                       disabled={loading || departmentsLoading}
-                      className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex w-full sm:w-auto items-center justify-center rounded-full bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {loading ? "Submitting..." : departmentsLoading ? "Loading data..." : "Submit Issue"}
                     </button>
@@ -410,11 +451,12 @@ function FieldLabel({ htmlFor, label, description, required }: { htmlFor: string
   );
 }
 
-function TextField({ id, label, description, placeholder, value, onChange, required }: {
+function TextField({ id, label, description, placeholder, value, onChange, required, maxLength }: {
   id: string;
   label: string;
   description?: string;
   placeholder?: string;
+  maxLength?: number;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
@@ -428,6 +470,7 @@ function TextField({ id, label, description, placeholder, value, onChange, requi
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
+        maxLength={maxLength}
         className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
         placeholder={placeholder}
       />

@@ -31,6 +31,7 @@ type IssueDetails = {
   location?: string;
   imageUrl?: string | null;
   attachments?: string[];
+  resolutionAttachments?: string[];
   createdAt?: string;
   updatedAt?: string;
   dueDate?: string;
@@ -48,6 +49,10 @@ type AuditLog = {
   performedBy?: { name?: string };
   newValue?: Record<string, unknown>;
 };
+
+type IssuePriority = "Low" | "Medium" | "High" | "Urgent";
+
+const PRIORITY_OPTIONS: IssuePriority[] = ["Low", "Medium", "High", "Urgent"];
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   electrical: ["electrical", "electric", "elec"],
@@ -70,12 +75,13 @@ export default function DeptAdminIssueDetailPage() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [workerId, setWorkerId] = useState("");
   const [nextStatus, setNextStatus] = useState("In Progress");
-  const [statusNote, setStatusNote] = useState("");
+  const [nextPriority, setNextPriority] = useState<IssuePriority>("Medium");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
 
   const isClosed = issue?.status === "Resolved" || issue?.status === "Rejected";
+  const uploadedImageSources = useMemo(() => getIssueImageSources(issue), [issue]);
 
   const relatedWorkers = useMemo(() => {
     if (!issue) return [] as Worker[];
@@ -158,6 +164,7 @@ export default function DeptAdminIssueDetailPage() {
       setLogs(issueRes.logs || []);
       setWorkers(workersRes.workers || []);
       setWorkerId(issueRes.issue?.assignedStaff?._id || "");
+      setNextPriority(normalizePriority(issueRes.issue?.priority));
     } catch (err) {
       showToast({ title: "Load Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {
@@ -198,14 +205,32 @@ export default function DeptAdminIssueDetailPage() {
     try {
       const res = await authFetch(
         `/api/dept-admin/issues/${issueId}/status`,
-        { method: "PATCH", body: JSON.stringify({ status: nextStatus, note: statusNote }) },
+        { method: "PATCH", body: JSON.stringify({ status: nextStatus }) },
         auth.token
       );
       showToast({ title: "Success", message: res.message || "Updated", variant: "success" });
-      setStatusNote("");
       await load();
     } catch (err) {
       showToast({ title: "Status Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updatePriority = async () => {
+    if (!auth || !issueId) return;
+
+    setSaving(true);
+    try {
+      const res = await authFetch(
+        `/api/dept-admin/issues/${issueId}`,
+        { method: "PATCH", body: JSON.stringify({ priority: nextPriority }) },
+        auth.token
+      );
+      showToast({ title: "Success", message: res.message || `Priority updated to ${nextPriority}`, variant: "success" });
+      await load();
+    } catch (err) {
+      showToast({ title: "Priority Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -217,11 +242,10 @@ export default function DeptAdminIssueDetailPage() {
     try {
       const res = await authFetch(
         `/api/dept-admin/issues/${issueId}/status`,
-        { method: "PATCH", body: JSON.stringify({ status: nextStatus, note: statusNote }) },
+        { method: "PATCH", body: JSON.stringify({ status: nextStatus }) },
         auth.token
       );
       showToast({ title: "Success", message: res.message || "Updated", variant: "success" });
-      setStatusNote("");
       setShowRejectConfirm(false);
       await load();
     } catch (err) {
@@ -261,18 +285,15 @@ export default function DeptAdminIssueDetailPage() {
               <p className="mt-2 text-sm text-slate-600">{issue.description || "No description provided."}</p>
             </div>
 
-            {issue.imageUrl || issue.attachments?.length ? (
+            {uploadedImageSources.length > 0 ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <h3 className="text-sm font-semibold text-slate-700">Uploaded Image</h3>
+                <h3 className="text-sm font-semibold text-slate-700">Uploaded Images</h3>
                 <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {[issue.imageUrl, ...(issue.attachments || [])]
-                    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-                    .filter((value, index, arr) => arr.indexOf(value) === index)
-                    .map((src, idx) => (
+                  {uploadedImageSources.map((src, idx) => (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         key={`${src}-${idx}`}
-                        src={src}
+                        src={toDisplayImageSrc(src)}
                         alt={`Issue attachment ${idx + 1}`}
                         className="h-48 w-full rounded-lg border border-slate-200 object-cover"
                       />
@@ -312,18 +333,42 @@ export default function DeptAdminIssueDetailPage() {
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <h3 className="text-sm font-semibold text-slate-700">Update Status</h3>
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)} className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500">
                   <option value="In Progress">In Progress</option>
                   <option value="Resolved">Resolved</option>
                   <option value="Rejected">Rejected</option>
                 </select>
-                <input value={statusNote} onChange={(event) => setStatusNote(event.target.value)} placeholder="Status note (optional)" className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500 sm:col-span-2" />
+                <button type="button" onClick={updateStatus} disabled={saving || isClosed} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-60">
+                  Save Status
+                </button>
               </div>
-              <button type="button" onClick={updateStatus} disabled={saving || isClosed} className="mt-2 h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-60">
-                Save Status
-              </button>
               {isClosed ? <p className="mt-2 text-xs text-slate-500">This issue is closed and can no longer be changed.</p> : null}
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <h3 className="text-sm font-semibold text-slate-700">Update Priority</h3>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <select
+                  value={nextPriority}
+                  onChange={(event) => setNextPriority(event.target.value as IssuePriority)}
+                  disabled={saving || isClosed}
+                  className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-amber-500 disabled:opacity-60"
+                >
+                  {PRIORITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={updatePriority}
+                  disabled={saving || isClosed}
+                  className="h-10 rounded-lg bg-amber-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  Save Priority
+                </button>
+              </div>
+              {isClosed ? <p className="mt-2 text-xs text-slate-500">Priority can be changed only for open issues.</p> : null}
             </div>
           </section>
 
@@ -370,6 +415,42 @@ function formatResolvedAt(issue: IssueDetails) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
+}
+
+function normalizePriority(value?: string): IssuePriority {
+  if (value === "Low" || value === "Medium" || value === "High" || value === "Urgent") {
+    return value;
+  }
+
+  return "Medium";
+}
+
+function getIssueImageSources(issue: IssueDetails | null) {
+  if (!issue) return [] as string[];
+
+  const candidates = [
+    issue.imageUrl,
+    ...(Array.isArray(issue.attachments) ? issue.attachments : []),
+    ...(Array.isArray(issue.resolutionAttachments) ? issue.resolutionAttachments : []),
+  ];
+
+  return candidates
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function toDisplayImageSrc(src: string) {
+  if (/^(https?:|data:|blob:)/i.test(src)) {
+    return src;
+  }
+
+  if (src.startsWith("/")) {
+    return src;
+  }
+
+  return `/${src.replace(/^\.\//, "")}`;
 }
 
 function Meta({ label, value }: { label: string; value: string }) {

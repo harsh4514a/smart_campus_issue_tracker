@@ -27,7 +27,7 @@ export function StudentNavbar({
   reportHref = "/student/report",
   className = "",
 }: StudentNavbarProps) {
-  const headerClass = `sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 px-6 py-6 flex items-center justify-between ${className}`;
+  const headerClass = `sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 px-6 py-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${className}`;
 
   return (
     <header className={headerClass.trim()}>
@@ -36,11 +36,11 @@ export function StudentNavbar({
           {title ?? `Welcome back, ${firstName}!`}
         </h1>
         <p className="text-slate-500 mt-1">
-          {subtitle ?? "Here&apos;s an overview of your reported issues."}
+          {subtitle ?? "Here's an overview of your reported issues."}
         </p>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex w-full items-center justify-between gap-4 sm:w-auto sm:justify-end">
         <Link
           href={reportHref}
           className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"

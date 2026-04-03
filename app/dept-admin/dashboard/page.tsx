@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import DeptAdminShell from "@/components/dept-admin/DeptAdminShell";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 import {
@@ -15,16 +16,19 @@ import {
   UserRound,
   Zap,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+
+const IssueTrendChart = dynamic(() => import("@/components/dept-admin/IssueTrendChart"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-full animate-pulse rounded-lg border border-slate-200 bg-slate-50" />
+  ),
+});
+
+const MAX_RECENT_ACTIVITY_ITEMS = 8;
+const MAX_CRITICAL_ITEMS = 10;
+const MAX_WORKER_ITEMS = 12;
+const MAX_DISTRIBUTION_ITEMS = 8;
+const MAX_TREND_POINTS = 14;
 
 type Department = { _id: string; name: string; type?: string };
 
@@ -115,30 +119,110 @@ export default function DeptAdminDashboardPage() {
     return suggestions.slice(0, 3);
   }, [data]);
 
+  const trendChartData = useMemo(() => {
+    if (!data?.trend?.length) {
+      return [] as Array<{
+        issues: number;
+        movingAvg: number;
+        shortDate: string;
+        fullDate: string;
+      }>;
+    }
+
+    const sorted = data.trend
+      .map((row) => {
+        const parsedDate = new Date(String(row._id));
+        const time = parsedDate.getTime();
+
+        return {
+          rawDate: String(row._id),
+          dateObj: Number.isNaN(time) ? null : parsedDate,
+          sortKey: Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time,
+          issues: Number(row.count) || 0,
+        };
+      })
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .slice(-MAX_TREND_POINTS);
+
+    return sorted.map((point, index, allPoints) => {
+      const prev = allPoints[index - 1]?.issues ?? point.issues;
+      const next = allPoints[index + 1]?.issues ?? point.issues;
+      const movingAvg = Number(((prev + point.issues + next) / 3).toFixed(2));
+
+      return {
+        issues: point.issues,
+        movingAvg,
+        shortDate: point.dateObj
+          ? point.dateObj.toLocaleDateString(undefined, { day: "2-digit", month: "short" })
+          : point.rawDate,
+        fullDate: point.dateObj
+          ? point.dateObj.toLocaleDateString(undefined, {
+              weekday: "short",
+              day: "2-digit",
+              month: "long",
+              year: "numeric",
+            })
+          : point.rawDate,
+      };
+    });
+  }, [data?.trend]);
+
+  const loadDashboard = useCallback(async (signal?: AbortSignal) => {
+    if (!auth) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (departmentId !== "all") params.set("departmentId", departmentId);
+      const res = await authFetch(
+        `/api/dept-admin/dashboard?${params.toString()}`,
+        { method: "GET", signal },
+        auth.token
+      );
+      if (!signal?.aborted) {
+        setData(res as DashboardResponse);
+      }
+    } catch (err) {
+      if (signal?.aborted) return;
+      setError(err instanceof Error ? err.message : "Failed to load dashboard");
+    } finally {
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
+    }
+  }, [auth, departmentId]);
+
   useEffect(() => {
     if (!auth) return;
 
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams();
-        if (departmentId !== "all") params.set("departmentId", departmentId);
-        const res = await authFetch(`/api/dept-admin/dashboard?${params.toString()}`, { method: "GET" }, auth.token);
-        if (!cancelled) setData(res as DashboardResponse);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load dashboard");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
+    const controller = new AbortController();
+    void loadDashboard(controller.signal);
 
-    void load();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [auth, departmentId]);
+  }, [auth, loadDashboard]);
+
+  const displayedRecentActivity = useMemo(
+    () => (data?.recentActivity || []).slice(0, MAX_RECENT_ACTIVITY_ITEMS),
+    [data?.recentActivity]
+  );
+
+  const displayedCriticalIssues = useMemo(
+    () => (data?.criticalIssues || []).slice(0, MAX_CRITICAL_ITEMS),
+    [data?.criticalIssues]
+  );
+
+  const displayedWorkers = useMemo(
+    () => (data?.workerSummary || []).slice(0, MAX_WORKER_ITEMS),
+    [data?.workerSummary]
+  );
+
+  const displayedDistribution = useMemo(
+    () => (data?.distribution || []).slice(0, MAX_DISTRIBUTION_ITEMS),
+    [data?.distribution]
+  );
 
   return (
     <DeptAdminShell title="Department Admin Dashboard" subtitle="Action-driven overview for department operations">
@@ -202,10 +286,10 @@ export default function DeptAdminDashboardPage() {
               <div className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2">
                 <h3 className="text-sm font-semibold text-slate-700">Recent Activity</h3>
                 <div className="mt-3 space-y-2">
-                  {data.recentActivity.length === 0 ? (
+                  {displayedRecentActivity.length === 0 ? (
                     <p className="text-sm text-slate-500">No recent activity.</p>
                   ) : (
-                    data.recentActivity.map((item) => (
+                    displayedRecentActivity.map((item) => (
                       <Link key={item._id} href={`/dept-admin/issues/${item.issueId}`} className="block rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700 hover:bg-emerald-50">
                         <p className="flex items-center gap-2 font-medium">
                           <CircleDot className="h-4 w-4 text-emerald-600" />
@@ -227,10 +311,10 @@ export default function DeptAdminDashboardPage() {
                   <ShieldAlert className="h-4 w-4 text-rose-600" /> Critical Issues
                 </h3>
                 <div className="mt-3 space-y-2">
-                  {data.criticalIssues.length === 0 ? (
+                  {displayedCriticalIssues.length === 0 ? (
                     <p className="text-sm text-slate-500">No critical items right now.</p>
                   ) : (
-                    data.criticalIssues.map((issue) => (
+                    displayedCriticalIssues.map((issue) => (
                       <Link key={issue._id} href={`/dept-admin/issues/${issue._id}`} className="flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 hover:bg-rose-100">
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{issue.title}</p>
@@ -268,10 +352,10 @@ export default function DeptAdminDashboardPage() {
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <h3 className="text-sm font-semibold text-slate-700">Worker Summary</h3>
                 <div className="mt-3 space-y-2">
-                  {data.workerSummary.length === 0 ? (
+                  {displayedWorkers.length === 0 ? (
                     <p className="text-sm text-slate-500">No workers mapped to your department.</p>
                   ) : (
-                    data.workerSummary.map((worker) => (
+                    displayedWorkers.map((worker) => (
                       <Link href={`/dept-admin/workers`} key={worker._id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 hover:bg-slate-100">
                         <p className="flex items-center gap-2 text-sm font-medium text-slate-800"><UserRound className="h-4 w-4" />{worker.name}</p>
                         <div className="text-right text-xs">
@@ -293,7 +377,7 @@ export default function DeptAdminDashboardPage() {
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <h3 className="text-sm font-semibold text-slate-700">Issue Distribution</h3>
                 <div className="mt-4 space-y-2">
-                  {data.distribution.map((row) => (
+                  {displayedDistribution.map((row) => (
                     <div key={row._id || "Unknown"}>
                       <div className="mb-1 flex justify-between text-xs text-slate-600">
                         <span>{row._id || "Unknown"}</span>
@@ -311,46 +395,9 @@ export default function DeptAdminDashboardPage() {
             <section className="rounded-xl border border-slate-200 bg-white p-4">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700"><Zap className="h-4 w-4 text-teal-600" /> Issue Trend (Last 7 days)</h3>
               <div className="mt-3 h-72">
-                {data.trend.length === 0 ? (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
-                    No trend data available.
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={data.trend.map((row) => ({ date: row._id, issues: row.count }))} margin={{ top: 10, right: 16, left: 2, bottom: 2 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => {
-                          const date = new Date(String(value));
-                          if (Number.isNaN(date.getTime())) return String(value);
-                          return `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1).toString().padStart(2, "0")}`;
-                        }}
-                      />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} label={{ value: "Issue Count", angle: -90, position: "insideLeft", style: { fontSize: 12, fill: "#475569" } }} />
-                      <Tooltip
-                        formatter={(value) => [value, "Issues"]}
-                        labelFormatter={(label) => {
-                          const date = new Date(String(label));
-                          return Number.isNaN(date.getTime()) ? String(label) : date.toDateString();
-                        }}
-                      />
-                      <Legend iconType="circle" />
-                      <Line
-                        type="monotone"
-                        dataKey="issues"
-                        name="Issues Reported"
-                        stroke="#0D9488"
-                        strokeWidth={3}
-                        dot={{ r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
+                <IssueTrendChart data={trendChartData} />
               </div>
-              <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500"><CalendarRange className="h-3.5 w-3.5" /> Daily reported issue count for the selected department scope.</p>
+              <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500"><CalendarRange className="h-3.5 w-3.5" /> Bars show daily issue count; line shows smoothed 3-day trend.</p>
             </section>
           </>
         ) : null}
@@ -359,7 +406,7 @@ export default function DeptAdminDashboardPage() {
   );
 }
 
-function KpiCard({ label, value, icon, href }: { label: string; value: number; icon: React.ReactNode; href: string }) {
+const KpiCard = memo(function KpiCard({ label, value, icon, href }: { label: string; value: number; icon: React.ReactNode; href: string }) {
   return (
     <Link href={href} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50">
       <div className="flex items-center justify-between">
@@ -369,9 +416,9 @@ function KpiCard({ label, value, icon, href }: { label: string; value: number; i
       <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
     </Link>
   );
-}
+});
 
-function DashboardSkeleton() {
+const DashboardSkeleton = memo(function DashboardSkeleton() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -386,4 +433,4 @@ function DashboardSkeleton() {
       <div className="skeleton-shimmer h-60 rounded-xl border border-slate-200 bg-white" />
     </div>
   );
-}
+});

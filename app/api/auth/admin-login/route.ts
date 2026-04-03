@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       }
 
       if (demoAdminUser.isActive === false) {
-        return NextResponse.json({ message: "Account is inactive. Please contact super admin." }, { status: 403 });
+        return NextResponse.json({ message: "Your account is deactivated. Contact admin." }, { status: 403 });
       }
 
       const token = signToken({
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       }
 
       if (adminUser.isActive === false) {
-        return NextResponse.json({ message: "Account is inactive. Please contact super admin." }, { status: 403 });
+        return NextResponse.json({ message: "Your account is deactivated. Contact admin." }, { status: 403 });
       }
 
       const isMatch = await adminUser.comparePassword(String(password));
@@ -168,6 +168,10 @@ export async function POST(request: Request) {
 
     if (!adminUser) {
       return NextResponse.json({ message: "Failed to create admin user." }, { status: 500 });
+    }
+
+    if (adminUser.isActive === false) {
+      return NextResponse.json({ message: "Your account is deactivated. Contact admin." }, { status: 403 });
     }
 
     const token = signToken({

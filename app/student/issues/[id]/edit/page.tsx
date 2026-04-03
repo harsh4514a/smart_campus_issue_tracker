@@ -10,7 +10,7 @@ import { StudentUserActions } from "@/app/student/components/StudentUserActions"
 import { authFetch, clearAuth, loadAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
 
-const categories = ["Cleaning", "Electrical", "IT Support", "Network / Internet", "Plumbing", "Furniture"];
+const fallbackServiceCategories = ["Cleaning", "Electrical", "IT Support", "Network / Internet", "Plumbing", "Furniture", "Other"];
 
 type IssueDetail = {
   _id: string;
@@ -21,6 +21,12 @@ type IssueDetail = {
   imageUrl?: string | null;
   status?: string;
   dueDate?: string;
+};
+
+type Department = {
+  _id: string;
+  name: string;
+  type?: "Academic" | "Service";
 };
 
 export default function StudentIssueEditPage() {
@@ -49,6 +55,29 @@ export default function StudentIssueEditPage() {
   const [loading, setLoading] = useState(false);
   const [loadingIssue, setLoadingIssue] = useState(true);
   const [currentIssue, setCurrentIssue] = useState<IssueDetail | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(true);
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!auth) return;
+
+    setDepartmentsLoading(true);
+    setDepartmentsError(null);
+
+    authFetch("/api/departments", { method: "GET" }, auth.token)
+      .then((data) => {
+        const allDepartments = (data.departments || []) as Department[];
+        setDepartments(allDepartments);
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : "Failed to load categories";
+        setDepartmentsError(message);
+      })
+      .finally(() => {
+        setDepartmentsLoading(false);
+      });
+  }, [auth]);
 
   useEffect(() => {
     if (!auth || !issueId) return;
@@ -102,6 +131,26 @@ export default function StudentIssueEditPage() {
     return `${hours} hour${hours > 1 ? "s" : ""}`;
   }, [currentIssue?.dueDate, currentIssue?.status]);
 
+  const serviceCategoryOptions = useMemo(() => {
+    const categories = departments
+      .filter((department) => department.type === "Service")
+      .map((department) => department.name.trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(categories));
+  }, [departments]);
+
+  const availableCategories = useMemo(() => {
+    const seeded = serviceCategoryOptions.length > 0 ? serviceCategoryOptions : fallbackServiceCategories;
+    const merged = new Set(seeded);
+    if (form.category.trim()) {
+      merged.add(form.category.trim());
+    }
+    return Array.from(merged);
+  }, [form.category, serviceCategoryOptions]);
+
+  const usingFallbackCategories = !departmentsLoading && serviceCategoryOptions.length === 0;
+
   const handleChange = (field: keyof typeof form) => (value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -115,9 +164,32 @@ export default function StudentIssueEditPage() {
       return;
     }
 
+    if (!form.category) {
+      showToast({ message: "Please select a category.", variant: "error" });
+      return;
+    }
+
+    const trimmedTitle = form.title.trim();
+    if (trimmedTitle.length < 5 || trimmedTitle.length > 120) {
+      showToast({ message: "Title must be between 5 and 120 characters.", variant: "error" });
+      return;
+    }
+
+    const trimmedDescription = form.description.trim();
+    if (trimmedDescription.length > 1000) {
+      showToast({ message: "Description must be 1000 characters or fewer.", variant: "error" });
+      return;
+    }
+
+    const trimmedBuilding = form.building.trim();
+    if (!trimmedBuilding) {
+      showToast({ message: "Building is required.", variant: "error" });
+      return;
+    }
+
     setLoading(true);
 
-    const location = [form.building, form.room, form.area].filter(Boolean).join(" · ") || "Not specified";
+    const location = [trimmedBuilding, form.room.trim(), form.area.trim()].filter(Boolean).join(" · ") || "Not specified";
 
     try {
       await authFetch(
@@ -125,8 +197,8 @@ export default function StudentIssueEditPage() {
         {
           method: "PATCH",
           body: JSON.stringify({
-            title: form.title.trim(),
-            description: form.description.trim(),
+            title: trimmedTitle,
+            description: trimmedDescription,
             category: form.category,
             location,
             imageUrl: photoPreview,
@@ -145,7 +217,7 @@ export default function StudentIssueEditPage() {
   };
 
   return (
-  <Protected allowedRoles={["student", "faculty"]}>
+    <Protected allowedRoles={["student", "faculty"]}>
       <div className="min-h-screen bg-slate-50 flex">
         <StudentSidebar
           pathname={pathname}
@@ -188,6 +260,18 @@ export default function StudentIssueEditPage() {
                   </div>
                 ) : (
                   <form className="space-y-6" onSubmit={onSubmit}>
+                    {departmentsError ? (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        {departmentsError}
+                      </div>
+                    ) : null}
+
+                    {usingFallbackCategories ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                        Service categories are temporarily unavailable, so default categories are shown.
+                      </div>
+                    ) : null}
+
                     <div className="grid gap-6">
                       <div className="space-y-2">
                         <FieldLabel htmlFor="category" label="Category" required description="Select the closest category" />
@@ -196,12 +280,13 @@ export default function StudentIssueEditPage() {
                           value={form.category}
                           onChange={(e) => handleChange("category")(e.target.value)}
                           required
+                          disabled={departmentsLoading}
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                         >
                           <option value="" disabled>
-                            Select a category
+                            {departmentsLoading ? "Loading categories..." : "Select a category"}
                           </option>
-                          {categories.map((category) => (
+                          {availableCategories.map((category) => (
                             <option key={category} value={category}>
                               {category}
                             </option>
@@ -217,6 +302,8 @@ export default function StudentIssueEditPage() {
                           value={form.title}
                           onChange={(e) => handleChange("title")(e.target.value)}
                           required
+                          minLength={5}
+                          maxLength={120}
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                           placeholder="Brief description of the issue"
                         />
@@ -229,6 +316,7 @@ export default function StudentIssueEditPage() {
                           value={form.description}
                           onChange={(e) => handleChange("description")(e.target.value)}
                           rows={4}
+                          maxLength={1000}
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                           placeholder="Provide more details about the issue..."
                         />
@@ -240,6 +328,7 @@ export default function StudentIssueEditPage() {
                           label="Building"
                           placeholder="e.g., Science Block"
                           required
+                          maxLength={80}
                           value={form.building}
                           onChange={handleChange("building")}
                         />
@@ -247,6 +336,7 @@ export default function StudentIssueEditPage() {
                           id="room"
                           label="Room"
                           placeholder="e.g., Room 101"
+                          maxLength={50}
                           value={form.room}
                           onChange={handleChange("room")}
                         />
@@ -254,6 +344,7 @@ export default function StudentIssueEditPage() {
                           id="area"
                           label="Area"
                           placeholder="e.g., Hallway"
+                          maxLength={60}
                           value={form.area}
                           onChange={handleChange("area")}
                         />
@@ -303,10 +394,10 @@ export default function StudentIssueEditPage() {
                       </Link>
                       <button
                         type="submit"
-                        disabled={loading}
+                        disabled={loading || departmentsLoading}
                         className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {loading ? "Saving..." : "Save Changes"}
+                        {loading ? "Saving..." : departmentsLoading ? "Loading data..." : "Save Changes"}
                       </button>
                     </div>
                   </form>
@@ -377,10 +468,12 @@ function TextField({
   value,
   onChange,
   required,
+  maxLength,
 }: {
   id: string;
   label: string;
   placeholder?: string;
+  maxLength?: number;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
@@ -394,6 +487,7 @@ function TextField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
+        maxLength={maxLength}
         className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
         placeholder={placeholder}
       />

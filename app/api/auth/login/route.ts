@@ -25,6 +25,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });
     }
 
+    if (user.isActive === false) {
+      return NextResponse.json({ message: "Your account is deactivated. Contact admin." }, { status: 403 });
+    }
+
     // Admin account must authenticate only through /api/auth/admin-login.
     if (user.role === "admin") {
       return NextResponse.json({ message: "Invalid credentials." }, { status: 401 });

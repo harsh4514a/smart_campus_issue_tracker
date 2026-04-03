@@ -2,6 +2,7 @@
 
 import { useMemo, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import AdminProtected from "@/components/AdminProtected";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 import AdminShell from "@/components/admin/AdminShell";
@@ -60,7 +61,7 @@ type AuditEntry = {
 type StatusFilter = "All" | "Pending" | "In Progress" | "Resolved" | "Assigned" | "Unassigned" | "Overdue";
 type IssueTab = "active" | "rejected";
 type PriorityFilter = "All" | "Low" | "Medium" | "High" | "Urgent";
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 20000;
 
 export default function AdminIssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -104,6 +105,7 @@ export default function AdminIssuesPage() {
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
   const auth = useMemo(() => loadAuth(), []);
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -134,7 +136,7 @@ export default function AdminIssuesPage() {
   useEffect(() => {
     if (!auth) return;
     const intervalId = window.setInterval(() => {
-      if (!savingId) {
+      if (!savingId && !document.hidden) {
         load();
       }
     }, POLL_INTERVAL_MS);
@@ -144,79 +146,69 @@ export default function AdminIssuesPage() {
   }, [auth, savingId]);
 
   useEffect(() => {
-    const applyStatusFromQuery = () => {
-      const query = new URLSearchParams(window.location.search);
-      const rawStatus = query.get("status");
-      const rawDepartment = query.get("department");
-      const rawStaffId = query.get("staffId");
-      const rawStudentId = query.get("studentId");
+    const rawStatus = searchParams.get("status");
+    const rawDepartment = searchParams.get("department");
+    const rawStaffId = searchParams.get("staffId");
+    const rawStudentId = searchParams.get("studentId");
 
-      setDepartmentFilter(rawDepartment ? decodeURIComponent(rawDepartment) : "All");
-      setStaffFilterId(rawStaffId || "");
-      setStudentFilterId(rawStudentId || "");
-      if (!rawStatus) return;
+    setDepartmentFilter(rawDepartment ? decodeURIComponent(rawDepartment) : "All");
+    setStaffFilterId(rawStaffId || "");
+    setStudentFilterId(rawStudentId || "");
+    if (!rawStatus) return;
 
-      const normalizedStatus = decodeURIComponent(rawStatus).trim().toLowerCase();
+    const normalizedStatus = decodeURIComponent(rawStatus).trim().toLowerCase();
 
-      if (normalizedStatus === "pending") {
-        setIssueTab("active");
-        setStatusFilter("Pending");
-        return;
-      }
+    if (normalizedStatus === "pending") {
+      setIssueTab("active");
+      setStatusFilter("Pending");
+      return;
+    }
 
-      if (normalizedStatus === "assigned") {
-        setIssueTab("active");
-        setStatusFilter("Assigned");
-        return;
-      }
+    if (normalizedStatus === "assigned") {
+      setIssueTab("active");
+      setStatusFilter("Assigned");
+      return;
+    }
 
-      if (normalizedStatus === "in progress") {
-        setIssueTab("active");
-        setStatusFilter("In Progress");
-        return;
-      }
+    if (normalizedStatus === "in progress") {
+      setIssueTab("active");
+      setStatusFilter("In Progress");
+      return;
+    }
 
-      if (normalizedStatus === "resolved") {
-        setIssueTab("active");
-        setStatusFilter("Resolved");
-        return;
-      }
+    if (normalizedStatus === "resolved") {
+      setIssueTab("active");
+      setStatusFilter("Resolved");
+      return;
+    }
 
-      if (normalizedStatus === "rejected") {
-        setIssueTab("rejected");
-        setStatusFilter("All");
-        return;
-      }
+    if (normalizedStatus === "rejected") {
+      setIssueTab("rejected");
+      setStatusFilter("All");
+      return;
+    }
 
-      if (normalizedStatus === "unassigned") {
-        setIssueTab("active");
-        setStatusFilter("Unassigned");
-        return;
-      }
+    if (normalizedStatus === "unassigned") {
+      setIssueTab("active");
+      setStatusFilter("Unassigned");
+      return;
+    }
 
-      if (normalizedStatus === "overdue") {
-        setIssueTab("active");
-        setStatusFilter("Overdue");
-      }
-    };
-
-    applyStatusFromQuery();
-    window.addEventListener("popstate", applyStatusFromQuery);
-
-    return () => {
-      window.removeEventListener("popstate", applyStatusFromQuery);
-    };
-  }, []);
+    if (normalizedStatus === "overdue") {
+      setIssueTab("active");
+      setStatusFilter("Overdue");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
-    const issueId = new URLSearchParams(window.location.search).get("issueId");
+    const issueId = searchParams.get("issueId");
     if (!issueId) return;
 
     const matched = issues.find((issue) => issue._id === issueId);
     if (matched) {
       setViewIssue(matched);
     }
-  }, [issues]);
+  }, [issues, searchParams]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1474,7 +1466,6 @@ export default function AdminIssuesPage() {
                   >
                     <option value="10">10 / page</option>
                     <option value="20">20 / page</option>
-                    <option value="50">50 / page</option>
                   </select>
                   <button
                     type="button"

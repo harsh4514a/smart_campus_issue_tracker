@@ -19,7 +19,9 @@ type Issue = {
 
 type SortBy = "created_desc" | "created_asc" | "status" | "category";
 
-const PAGE_LIMIT = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+const MAX_VISIBLE_PAGES = 5;
 const STATUS_OPTIONS = ["All", "Pending", "In Progress", "Resolved", "Rejected"] as const;
 
 export default function StudentAllIssuesPage() {
@@ -32,6 +34,7 @@ export default function StudentAllIssuesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
 
@@ -65,7 +68,7 @@ export default function StudentAllIssuesPage() {
 
     const params = new URLSearchParams({
       page: String(page),
-      limit: String(PAGE_LIMIT),
+      limit: String(pageSize),
       sortBy,
     });
 
@@ -107,7 +110,7 @@ export default function StudentAllIssuesPage() {
         const nextTotalPages =
           typeof payload.totalPages === "number" && Number.isFinite(payload.totalPages)
             ? Math.max(1, payload.totalPages)
-            : Math.max(1, Math.ceil(nextTotalItems / PAGE_LIMIT));
+            : Math.max(1, Math.ceil(nextTotalItems / pageSize));
         const nextPage = typeof payload.page === "number" && Number.isFinite(payload.page) ? payload.page : page;
 
         setTotalItems(nextTotalItems);
@@ -147,10 +150,11 @@ export default function StudentAllIssuesPage() {
       window.clearTimeout(loadingTimeoutId);
       controller.abort();
     };
-  }, [auth, categoryFilter, page, searchQuery, sortBy, statusFilter]);
+  }, [auth, categoryFilter, page, pageSize, searchQuery, sortBy, statusFilter]);
 
-  const showingStart = totalItems === 0 ? 0 : (page - 1) * PAGE_LIMIT + 1;
-  const showingEnd = totalItems === 0 ? 0 : Math.min(page * PAGE_LIMIT, totalItems);
+  const showingStart = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const showingEnd = totalItems === 0 ? 0 : Math.min(page * pageSize, totalItems);
+  const visiblePages = useMemo(() => getVisiblePages(page, totalPages, MAX_VISIBLE_PAGES), [page, totalPages]);
 
   const resetFilters = () => {
     setSearchInput("");
@@ -158,11 +162,16 @@ export default function StudentAllIssuesPage() {
     setStatusFilter("All");
     setCategoryFilter("All");
     setSortBy("created_desc");
+    setPageSize(DEFAULT_PAGE_SIZE);
     setPage(1);
   };
 
   const hasActiveFilters =
-    searchQuery.length > 0 || statusFilter !== "All" || categoryFilter !== "All" || sortBy !== "created_desc";
+    searchQuery.length > 0 ||
+    statusFilter !== "All" ||
+    categoryFilter !== "All" ||
+    sortBy !== "created_desc" ||
+    pageSize !== DEFAULT_PAGE_SIZE;
 
   return (
     <Protected allowedRoles={["student", "faculty"]}>
@@ -328,26 +337,82 @@ export default function StudentAllIssuesPage() {
               </div>
 
               <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3">
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                    disabled={loading || page <= 1}
-                    className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-xs font-medium text-slate-600">
-                    Page {page} of {Math.max(1, totalPages)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                    disabled={loading || page >= totalPages}
-                    className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Next
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                    <label htmlFor="issues-page-size" className="text-xs">Rows per page</label>
+                    <select
+                      id="issues-page-size"
+                      value={String(pageSize)}
+                      onChange={(event) => {
+                        const nextSize = Number(event.target.value);
+                        if (!Number.isFinite(nextSize) || nextSize <= 0) return;
+                        setPageSize(nextSize);
+                        setPage(1);
+                      }}
+                      className="inline-flex h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30"
+                    >
+                      {PAGE_SIZE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPage(1)}
+                      disabled={loading || page <= 1}
+                      className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      First
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                      disabled={loading || page <= 1}
+                      className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+
+                    {visiblePages.map((pageNumber) => (
+                      <button
+                        key={pageNumber}
+                        type="button"
+                        onClick={() => setPage(pageNumber)}
+                        disabled={loading}
+                        aria-current={pageNumber === page ? "page" : undefined}
+                        className={`inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+                          pageNumber === page
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        {pageNumber}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                      disabled={loading || page >= totalPages}
+                      className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPage(totalPages)}
+                      disabled={loading || page >= totalPages}
+                      className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Last
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -432,4 +497,24 @@ function formatRoleLabel(role?: string) {
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function getVisiblePages(currentPage: number, totalPages: number, maxVisible: number) {
+  const safeTotalPages = Math.max(1, totalPages);
+  const safeMaxVisible = Math.max(1, maxVisible);
+
+  if (safeTotalPages <= safeMaxVisible) {
+    return Array.from({ length: safeTotalPages }, (_, index) => index + 1);
+  }
+
+  const halfWindow = Math.floor(safeMaxVisible / 2);
+  let start = Math.max(1, currentPage - halfWindow);
+  let end = start + safeMaxVisible - 1;
+
+  if (end > safeTotalPages) {
+    end = safeTotalPages;
+    start = Math.max(1, end - safeMaxVisible + 1);
+  }
+
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }

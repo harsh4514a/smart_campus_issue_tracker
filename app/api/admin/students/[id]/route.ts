@@ -18,15 +18,25 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   try {
     const { id } = await context.params;
-    const student = await User.findOneAndDelete({ _id: id, role: { $in: ["student", "faculty"] } });
+    const student = await User.findOneAndUpdate(
+      { _id: id, role: { $in: ["student", "faculty"] } },
+      {
+        $set: {
+          isActive: false,
+          deactivatedAt: new Date(),
+          deactivatedBy: auth.user._id,
+        },
+      },
+      { new: true }
+    );
 
     if (!student) {
       return NextResponse.json({ message: "User not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ message: "User deleted." });
+    return NextResponse.json({ message: "User deactivated successfully" });
   } catch (error) {
-    console.error("Delete student error", error);
+    console.error("Deactivate student error", error);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

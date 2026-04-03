@@ -4,7 +4,19 @@ import { authenticateRequest } from "@/lib/auth";
 import User from "@/models/User";
 import Issue from "@/models/Issue";
 import Department from "@/models/Department";
-import { getDepartmentScopedIssueFilter } from "@/lib/rbac";
+import { getAdminDepartmentIds, getDepartmentScopedIssueFilter, isSuperAdmin } from "@/lib/rbac";
+import { getOrSetCache } from "@/lib/server-cache";
+
+function toNumber(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getTrendDirection(current: number, previous: number) {
+  if (current > previous) return "up" as const;
+  if (current < previous) return "down" as const;
+  return "flat" as const;
+}
 
 export async function GET(request: Request) {
   await connectDB();
@@ -18,134 +30,189 @@ export async function GET(request: Request) {
     const startOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
     const issueScopeFilter = getDepartmentScopedIssueFilter(auth.user);
+    const scopeKey = isSuperAdmin(auth.user)
+      ? "all"
+      : getAdminDepartmentIds(auth.user).sort().join(",") || "none";
+    const cacheKey = `admin:stats:${auth.user._id}:${scopeKey}`;
 
-    const [
-      studentCount,
-      facultyCount,
-      staffCount,
-      deptCount,
-      issueCount,
-      pendingCount,
-      inProgressCount,
-      resolvedCount,
-      assignedCount,
-      unassignedCount,
-      overdueCount,
-      pendingCurrentMonth,
-      pendingPreviousMonth,
-      resolvedCurrentMonth,
-      resolvedPreviousMonth,
-      recurringCount,
-      issuesForDepartment,
-    ] = await Promise.all([
-      User.countDocuments({ role: "student" }),
-      User.countDocuments({ role: "faculty" }),
-      User.countDocuments({ role: "staff" }),
-      Department.countDocuments({}),
-      Issue.countDocuments(issueScopeFilter),
-      Issue.countDocuments({ ...issueScopeFilter, status: "Pending" }),
-      Issue.countDocuments({ ...issueScopeFilter, status: "In Progress" }),
-      Issue.countDocuments({ ...issueScopeFilter, status: "Resolved" }),
-      Issue.countDocuments({
-        ...issueScopeFilter,
-        assignedStaff: { $ne: null },
-        status: { $in: ["Pending", "In Progress"] },
-      }),
-      Issue.countDocuments({ ...issueScopeFilter, assignedStaff: null }),
-      Issue.countDocuments({
-        ...issueScopeFilter,
-        status: { $nin: ["Resolved", "Rejected"] },
-        dueDate: { $lt: now },
-      }),
-      Issue.countDocuments({
-        ...issueScopeFilter,
-        status: "Pending",
-        createdAt: { $gte: startOfCurrentMonth },
-      }),
-      Issue.countDocuments({
-        ...issueScopeFilter,
-        status: "Pending",
-        createdAt: { $gte: startOfPreviousMonth, $lt: startOfCurrentMonth },
-      }),
-      Issue.countDocuments({
-        ...issueScopeFilter,
-        status: "Resolved",
-        createdAt: { $gte: startOfCurrentMonth },
-      }),
-      Issue.countDocuments({
-        ...issueScopeFilter,
-        status: "Resolved",
-        createdAt: { $gte: startOfPreviousMonth, $lt: startOfCurrentMonth },
-      }),
-      Issue.countDocuments({ ...issueScopeFilter, recurring: true }),
-      Issue.find(issueScopeFilter, "department academicDepartment serviceDepartment")
-        .populate("department", "name")
-        .populate("academicDepartment", "name")
-        .populate("serviceDepartment", "name")
-        .lean(),
-    ]);
+    const payload = await getOrSetCache(cacheKey, 15_000, async () => {
+      const [studentCount, facultyCount, staffCount, deptCount, metricRows, topDepartmentRows] =
+        await Promise.all([
+          User.countDocuments({ role: "student" }),
+          User.countDocuments({ role: "faculty" }),
+          User.countDocuments({ role: "staff" }),
+          Department.countDocuments({}),
+          Issue.aggregate([
+            { $match: issueScopeFilter },
+            {
+              $group: {
+                _id: null,
+                issues: { $sum: 1 },
+                pending: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } },
+                inProgress: { $sum: { $cond: [{ $eq: ["$status", "In Progress"] }, 1, 0] } },
+                resolved: { $sum: { $cond: [{ $eq: ["$status", "Resolved"] }, 1, 0] } },
+                assigned: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ["$assignedStaff", null] },
+                          { $in: ["$status", ["Pending", "In Progress"]] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                unassigned: { $sum: { $cond: [{ $eq: ["$assignedStaff", null] }, 1, 0] } },
+                overdue: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ["$dueDate", null] },
+                          { $lt: ["$dueDate", now] },
+                          { $ne: ["$status", "Resolved"] },
+                          { $ne: ["$status", "Rejected"] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                recurring: { $sum: { $cond: [{ $eq: ["$recurring", true] }, 1, 0] } },
+                pendingCurrentMonth: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ["$status", "Pending"] },
+                          { $gte: ["$createdAt", startOfCurrentMonth] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                pendingPreviousMonth: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ["$status", "Pending"] },
+                          { $gte: ["$createdAt", startOfPreviousMonth] },
+                          { $lt: ["$createdAt", startOfCurrentMonth] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                resolvedCurrentMonth: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ["$status", "Resolved"] },
+                          { $gte: ["$createdAt", startOfCurrentMonth] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                resolvedPreviousMonth: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ["$status", "Resolved"] },
+                          { $gte: ["$createdAt", startOfPreviousMonth] },
+                          { $lt: ["$createdAt", startOfCurrentMonth] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ]),
+          Issue.aggregate([
+            { $match: issueScopeFilter },
+            {
+              $project: {
+                scopedDepartment: {
+                  $ifNull: ["$serviceDepartment", { $ifNull: ["$academicDepartment", "$department"] }],
+                },
+              },
+            },
+            { $match: { scopedDepartment: { $ne: null } } },
+            { $group: { _id: "$scopedDepartment", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 1 },
+          ]),
+        ]);
 
-    const departmentCounts = new Map<string, number>();
-    for (const issue of issuesForDepartment) {
-      const serviceName =
-        issue.serviceDepartment && typeof issue.serviceDepartment === "object" && "name" in issue.serviceDepartment
-          ? String(issue.serviceDepartment.name || "")
-          : "";
-      const academicName =
-        issue.academicDepartment && typeof issue.academicDepartment === "object" && "name" in issue.academicDepartment
-          ? String(issue.academicDepartment.name || "")
-          : "";
-      const legacyName =
-        issue.department && typeof issue.department === "object" && "name" in issue.department
-          ? String(issue.department.name || "")
-          : "";
+      const metrics = metricRows[0] || {};
+      const topDepartmentId = topDepartmentRows[0]?._id ? String(topDepartmentRows[0]._id) : "";
+      const topDepartmentDoc = topDepartmentId
+        ? await Department.findById(topDepartmentId).select("name").lean()
+        : null;
+      const topDepartment = topDepartmentDoc?.name
+        ? {
+            name: String(topDepartmentDoc.name),
+            count: toNumber(topDepartmentRows[0]?.count),
+          }
+        : null;
 
-      const departmentName = serviceName || academicName || legacyName || "Unassigned";
-      departmentCounts.set(departmentName, (departmentCounts.get(departmentName) || 0) + 1);
-    }
+      const pendingCurrentMonth = toNumber(metrics.pendingCurrentMonth);
+      const pendingPreviousMonth = toNumber(metrics.pendingPreviousMonth);
+      const resolvedCurrentMonth = toNumber(metrics.resolvedCurrentMonth);
+      const resolvedPreviousMonth = toNumber(metrics.resolvedPreviousMonth);
 
-    const topDepartment = Array.from(departmentCounts.entries()).sort((a, b) => b[1] - a[1])[0];
-
-    const getTrendDirection = (current: number, previous: number) => {
-      if (current > previous) return "up" as const;
-      if (current < previous) return "down" as const;
-      return "flat" as const;
-    };
-
-    return NextResponse.json({
-      students: studentCount,
-      faculty: facultyCount,
-      staff: staffCount,
-      departments: deptCount,
-      issues: issueCount,
-      pending: pendingCount,
-      inProgress: inProgressCount,
-      assigned: assignedCount,
-      resolved: resolvedCount,
-      needsAttention: {
-        unassigned: unassignedCount,
-        overdue: overdueCount,
-        recurring: recurringCount,
-      },
-      insights: {
-        topDepartment: topDepartment
-          ? {
-              name: topDepartment[0],
-              count: topDepartment[1],
-            }
-          : null,
-      },
-      trends: {
-        pending: {
-          current: pendingCurrentMonth,
-          previous: pendingPreviousMonth,
-          direction: getTrendDirection(pendingCurrentMonth, pendingPreviousMonth),
+      return {
+        students: studentCount,
+        faculty: facultyCount,
+        staff: staffCount,
+        departments: deptCount,
+        issues: toNumber(metrics.issues),
+        pending: toNumber(metrics.pending),
+        inProgress: toNumber(metrics.inProgress),
+        assigned: toNumber(metrics.assigned),
+        resolved: toNumber(metrics.resolved),
+        needsAttention: {
+          unassigned: toNumber(metrics.unassigned),
+          overdue: toNumber(metrics.overdue),
+          recurring: toNumber(metrics.recurring),
         },
-        resolved: {
-          current: resolvedCurrentMonth,
-          previous: resolvedPreviousMonth,
-          direction: getTrendDirection(resolvedCurrentMonth, resolvedPreviousMonth),
+        insights: {
+          topDepartment,
         },
+        trends: {
+          pending: {
+            current: pendingCurrentMonth,
+            previous: pendingPreviousMonth,
+            direction: getTrendDirection(pendingCurrentMonth, pendingPreviousMonth),
+          },
+          resolved: {
+            current: resolvedCurrentMonth,
+            previous: resolvedPreviousMonth,
+            direction: getTrendDirection(resolvedCurrentMonth, resolvedPreviousMonth),
+          },
+        },
+      };
+    });
+
+    return NextResponse.json(payload, {
+      headers: {
+        "Cache-Control": "private, max-age=10, stale-while-revalidate=20",
       },
     });
   } catch (error) {

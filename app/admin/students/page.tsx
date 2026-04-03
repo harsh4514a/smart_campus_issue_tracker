@@ -7,12 +7,6 @@ import { authFetch, loadAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
 import { Search } from "lucide-react";
 
-type Department = {
-  _id: string;
-  name: string;
-  type?: "Academic" | "Service";
-};
-
 type Student = {
   _id: string;
   name: string;
@@ -42,11 +36,14 @@ export default function AdminStudentsPage() {
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "student" | "faculty">("all");
   const [academicFilter, setAcademicFilter] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "Active" | "Inactive">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"Active" | "Inactive">("Active");
   const [sortBy, setSortBy] = useState<"joined_desc" | "joined_asc" | "department" | "status">("joined_desc");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [loading, setLoading] = useState(true);
+  const [actionTarget, setActionTarget] = useState<Student | null>(null);
+  const [actionMode, setActionMode] = useState<"activate" | "deactivate" | null>(null);
+  const [actionSubmitting, setActionSubmitting] = useState(false);
   const [raisedCountMap, setRaisedCountMap] = useState<Record<string, number>>({});
   const searchRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -111,12 +108,14 @@ export default function AdminStudentsPage() {
   useEffect(() => {
     if (!auth) return;
     const intervalId = window.setInterval(() => {
-      loadStudents(true);
+      if (!actionTarget && !actionSubmitting) {
+        loadStudents(true);
+      }
     }, POLL_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth]);
+  }, [auth, actionTarget, actionSubmitting]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -147,12 +146,9 @@ export default function AdminStudentsPage() {
               .includes(academicFilter.toLowerCase())
           );
 
-    const byStatus =
-      statusFilter === "ALL"
-        ? byAcademic
-        : byAcademic.filter((student) =>
-            statusFilter === "Active" ? student.isActive !== false : student.isActive === false
-          );
+    const byStatus = byAcademic.filter((student) =>
+      statusFilter === "Active" ? student.isActive !== false : student.isActive === false
+    );
 
     const searched = !normalized
       ? byStatus
@@ -184,7 +180,7 @@ export default function AdminStudentsPage() {
     if (query.trim()) chips.push({ key: "query", label: `Search: ${query.trim()}` });
     if (roleFilter !== "all") chips.push({ key: "role", label: `Role: ${roleFilter === "student" ? "Student" : "Faculty"}` });
     if (academicFilter !== "ALL") chips.push({ key: "academic", label: `Department: ${academicFilter}` });
-    if (statusFilter !== "ALL") chips.push({ key: "status", label: `Status: ${statusFilter}` });
+    if (statusFilter === "Inactive") chips.push({ key: "status", label: "Status: Inactive" });
     return chips;
   }, [roleFilter, academicFilter, query, statusFilter]);
 
@@ -192,7 +188,7 @@ export default function AdminStudentsPage() {
     if (key === "query") setQuery("");
     if (key === "role") setRoleFilter("all");
     if (key === "academic") setAcademicFilter("ALL");
-    if (key === "status") setStatusFilter("ALL");
+    if (key === "status") setStatusFilter("Active");
     setCurrentPage(1);
   };
 
@@ -200,7 +196,7 @@ export default function AdminStudentsPage() {
     setQuery("");
     setRoleFilter("all");
     setAcademicFilter("ALL");
-    setStatusFilter("ALL");
+    setStatusFilter("Active");
     setSortBy("joined_desc");
     setCurrentPage(1);
   };
@@ -222,16 +218,26 @@ export default function AdminStudentsPage() {
     return filteredStudents.slice(start, start + pageSize);
   }, [filteredStudents, currentPage, pageSize]);
 
+  const studentsForCards = useMemo(() => {
+    if (academicFilter === "ALL") return students;
+
+    return students.filter((student) =>
+      `${getDepartmentName(student)} ${student.institute || ""}`
+        .toLowerCase()
+        .includes(academicFilter.toLowerCase())
+    );
+  }, [students, academicFilter]);
+
   const studentSummary = useMemo(() => {
-    const total = filteredStudents.length;
-    const studentsCount = filteredStudents.filter((item) => (item.role || "student") === "student").length;
-    const facultyCount = filteredStudents.filter((item) => (item.role || "student") === "faculty").length;
-    const active = filteredStudents.filter((student) => student.isActive !== false).length;
+    const total = studentsForCards.length;
+    const studentsCount = studentsForCards.filter((item) => (item.role || "student") === "student").length;
+    const facultyCount = studentsForCards.filter((item) => (item.role || "student") === "faculty").length;
+    const active = studentsForCards.filter((student) => student.isActive !== false).length;
     const inactive = total - active;
-    const issuesRaised = filteredStudents.reduce((sum, student) => sum + (raisedCountMap[student._id] || 0), 0);
+    const issuesRaised = studentsForCards.reduce((sum, student) => sum + (raisedCountMap[student._id] || 0), 0);
 
     return { total, studentsCount, facultyCount, active, inactive, issuesRaised };
-  }, [filteredStudents, raisedCountMap]);
+  }, [studentsForCards, raisedCountMap]);
 
   const exportCsv = () => {
     const rows = [
@@ -256,6 +262,50 @@ export default function AdminStudentsPage() {
     URL.revokeObjectURL(url);
   };
 
+  const openStatusAction = (student: Student) => {
+    const mode = student.isActive === false ? "activate" : "deactivate";
+    setActionTarget(student);
+    setActionMode(mode);
+  };
+
+  const closeStatusAction = () => {
+    if (actionSubmitting) return;
+    setActionTarget(null);
+    setActionMode(null);
+  };
+
+  const submitStatusAction = async () => {
+    if (!auth || !actionTarget || !actionMode) return;
+
+    const endpoint =
+      actionMode === "activate"
+        ? `/api/admin/users/${actionTarget._id}/activate`
+        : `/api/admin/users/${actionTarget._id}/deactivate`;
+
+    setActionSubmitting(true);
+    try {
+      await authFetch(endpoint, { method: "PATCH" }, auth.token);
+      showToast({
+        message:
+          actionMode === "activate"
+            ? "User activated successfully"
+            : "User deactivated successfully",
+        variant: "success",
+      });
+      setActionTarget(null);
+      setActionMode(null);
+      loadStudents(true);
+    } catch (err) {
+      showToast({
+        title: "Update Failed",
+        message: err instanceof Error ? err.message : "Failed to update user status",
+        variant: "error",
+      });
+    } finally {
+      setActionSubmitting(false);
+    }
+  };
+
   return (
     <AdminProtected allowedAdminRoles={["super_admin"]}>
       <AdminShell
@@ -272,11 +322,11 @@ export default function AdminStudentsPage() {
         }
       >
         <div className="space-y-4">
-          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Users</p>
               <p className="mt-2 text-2xl font-semibold text-slate-900">{studentSummary.total}</p>
-              <p className="mt-1 text-xs text-slate-500">Matching current filters</p>
+              <p className="mt-1 text-xs text-slate-500">Based on academic department filter</p>
             </article>
             <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Students</p>
@@ -287,6 +337,16 @@ export default function AdminStudentsPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Faculty</p>
               <p className="mt-2 text-2xl font-semibold text-violet-900">{studentSummary.facultyCount}</p>
               <p className="mt-1 text-xs text-violet-700">Role: faculty</p>
+            </article>
+            <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Active Users</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-900">{studentSummary.active}</p>
+              <p className="mt-1 text-xs text-emerald-700">Can sign in</p>
+            </article>
+            <article className="rounded-xl border border-rose-200 bg-rose-50 p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Inactive Users</p>
+              <p className="mt-2 text-2xl font-semibold text-rose-900">{studentSummary.inactive}</p>
+              <p className="mt-1 text-xs text-rose-700">Deactivated accounts</p>
             </article>
             <article className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Issues Raised</p>
@@ -359,12 +419,11 @@ export default function AdminStudentsPage() {
 
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as "ALL" | "Active" | "Inactive")}
+                onChange={(event) => setStatusFilter(event.target.value as "Active" | "Inactive")}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-teal-500 sm:w-44"
               >
-                <option value="ALL">All Status</option>
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
+                <option value="Active">Active Users</option>
+                <option value="Inactive">Inactive Users</option>
               </select>
 
               <select
@@ -378,6 +437,10 @@ export default function AdminStudentsPage() {
                 <option value="status">Sort: Status</option>
               </select>
             </div>
+
+            <p className="mt-2 text-xs text-slate-500">
+              Active users are shown by default. Switch to Inactive Users to view deactivated accounts.
+            </p>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {activeFilterChips.length > 0 ? (
@@ -425,11 +488,12 @@ export default function AdminStudentsPage() {
                     <Th>Department</Th>
                     <Th>Issues Raised</Th>
                     <Th>Status</Th>
+                    <Th className="text-right">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedStudents.map((student) => (
-                    <tr key={student._id} className="cursor-pointer border-b border-slate-200 transition hover:bg-gray-50 last:border-b-0">
+                    <tr key={student._id} className="border-b border-slate-200 transition hover:bg-gray-50 last:border-b-0">
                       <Td className="font-semibold text-slate-800">{student.name}</Td>
                       <Td>{student.email}</Td>
                       <Td>
@@ -454,18 +518,30 @@ export default function AdminStudentsPage() {
                         )}
                       </Td>
                       <Td>
-                        <span className="inline-flex items-center rounded-full bg-teal-600 px-3 py-1 text-xs font-semibold text-white">
-                          {student.isActive === false ? "Inactive" : "Active"}
-                        </span>
+                        <StatusBadge isActive={student.isActive !== false} />
                         {student.isDemoUser && process.env.NODE_ENV !== "production" ? (
                           <span className="ml-2 inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Test</span>
                         ) : null}
+                      </Td>
+                      <Td className="text-right">
+                        <button
+                          type="button"
+                          onClick={() => openStatusAction(student)}
+                          disabled={actionSubmitting}
+                          className={`inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                            student.isActive === false
+                              ? "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          {student.isActive === false ? "Activate" : "Deactivate"}
+                        </button>
                       </Td>
                     </tr>
                   ))}
                   {filteredStudents.length === 0 && (
                     <tr>
-                      <Td className="py-10 text-center text-slate-500" colSpan={6}>
+                      <Td className="py-10 text-center text-slate-500" colSpan={7}>
                         No data available
                       </Td>
                     </tr>
@@ -516,9 +592,91 @@ export default function AdminStudentsPage() {
               </div>
             </div>
           )}
+
+          {actionTarget && actionMode ? (
+            <StatusActionModal
+              open
+              mode={actionMode}
+              userName={actionTarget.name}
+              submitting={actionSubmitting}
+              onCancel={closeStatusAction}
+              onConfirm={submitStatusAction}
+            />
+          ) : null}
         </div>
       </AdminShell>
     </AdminProtected>
+  );
+}
+
+function StatusBadge({ isActive }: { isActive: boolean }) {
+  if (isActive) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+        Active
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+      Inactive
+    </span>
+  );
+}
+
+function StatusActionModal({
+  open,
+  mode,
+  userName,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  mode: "activate" | "deactivate";
+  userName: string;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+
+  const isDeactivate = mode === "deactivate";
+  const title = isDeactivate ? "Deactivate User" : "Activate User";
+  const message = isDeactivate
+    ? "Are you sure you want to deactivate this user? They will not be able to log in."
+    : "Activate this user account?";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+        <p className="mt-2 text-sm text-slate-600">{message}</p>
+        <p className="mt-1 text-xs text-slate-500">User: {userName}</p>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={submitting}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${
+              isDeactivate ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"
+            }`}
+          >
+            {submitting ? "Updating..." : isDeactivate ? "Deactivate" : "Activate"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -532,13 +690,4 @@ function Td({ children, className = "", colSpan }: { children: React.ReactNode; 
       {children}
     </td>
   );
-}
-
-function formatDate(value?: string) {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }

@@ -7,8 +7,12 @@ const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
 const smtpFrom = process.env.SMTP_FROM || smtpUser;
 const DEMO_EMAILS = new Set(
-  [process.env.DEMO_STUDENT_EMAIL, process.env.DEMO_STAFF_EMAIL, process.env.DEMO_ADMIN_EMAIL]
-    .filter(Boolean)
+  [
+    process.env.DEMO_STUDENT_EMAIL || "demo.student@charusat.edu.in",
+    process.env.DEMO_STAFF_EMAIL || "demo.worker@charusat.ac.in",
+    process.env.DEMO_ADMIN_EMAIL || "demo.admin@CampusTrackerer.com",
+    process.env.DEMO_DEPT_ADMIN_EMAIL || "demo.deptadmin@charusat.ac.in",
+  ]
     .map((email) => String(email).trim().toLowerCase())
 );
 

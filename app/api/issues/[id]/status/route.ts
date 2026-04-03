@@ -61,10 +61,10 @@ export async function PATCH(request: Request, { params }: Params) {
     });
 
     const studentEmail = (issue.student as { email?: string } | null)?.email;
-    if (studentEmail) {
+    if (studentEmail && status === "Resolved") {
       try {
         await sendIssueEventEmail({
-          event: status === "Resolved" ? "resolved" : "status_changed",
+          event: "resolved",
           to: [studentEmail],
           issue: {
             id: String(issue._id),
@@ -79,25 +79,6 @@ export async function PATCH(request: Request, { params }: Params) {
           },
           actorName: auth.user.name,
         });
-
-        if (status === "Resolved") {
-          await sendIssueEventEmail({
-            event: "feedback_request",
-            to: [studentEmail],
-            issue: {
-              id: String(issue._id),
-              title: issue.title,
-              department:
-                (issue.serviceDepartment as { name?: string } | null)?.name ||
-                (issue.academicDepartment as { name?: string } | null)?.name ||
-                (issue.department as { name?: string } | null)?.name ||
-                null,
-              priority: issue.priority,
-              status,
-            },
-            actorName: auth.user.name,
-          });
-        }
       } catch (mailErr) {
         console.error("Status email error", mailErr);
       }

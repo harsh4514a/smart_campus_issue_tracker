@@ -42,7 +42,11 @@ export function useStudentIssues(options: UseStudentIssuesOptions = {}) {
   const load = useCallback(
     (silent = false) => {
       const auth = loadAuth();
-      if (!auth) return Promise.resolve();
+      if (!auth) {
+        setIssues([]);
+        setLoading(false);
+        return Promise.resolve();
+      }
 
       if (!silent) {
         setLoading(true);
@@ -91,8 +95,8 @@ export function useStudentIssues(options: UseStudentIssuesOptions = {}) {
       }
     };
 
-    window.addEventListener("visibilitychange", onVisibilityChange);
-    return () => window.removeEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [load]);
 
   useEffect(() => {

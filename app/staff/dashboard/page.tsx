@@ -66,12 +66,53 @@ export default function StaffDashboard() {
       .slice(0, 6);
   }, [issues]);
 
+  const recommendationSourceIssues = useMemo(() => {
+    if (issues.length === 0) return [];
+
+    const openIssues = [...issues]
+      .filter((issue) => issue.status !== "Resolved" && issue.status !== "Rejected")
+      .sort((a, b) => {
+        const aSla = getSlaMeta(a);
+        const bSla = getSlaMeta(b);
+
+        const riskRank = (meta: ReturnType<typeof getSlaMeta>) =>
+          meta.level === "risk" ? 2 : meta.level === "watch" ? 1 : 0;
+        const riskDiff = riskRank(bSla) - riskRank(aSla);
+        if (riskDiff !== 0) return riskDiff;
+
+        const priorityDiff = getPriorityRank(b.priority) - getPriorityRank(a.priority);
+        if (priorityDiff !== 0) return priorityDiff;
+
+        const aDue = aSla.deadlineMs || Number.MAX_SAFE_INTEGER;
+        const bDue = bSla.deadlineMs || Number.MAX_SAFE_INTEGER;
+        return aDue - bDue;
+      });
+
+    const selected: StaffIssue[] = [];
+    const selectedIds = new Set<string>();
+
+    for (const issue of actionRequiredIssues) {
+      selected.push(issue);
+      selectedIds.add(issue._id);
+      if (selected.length >= 4) return selected;
+    }
+
+    for (const issue of openIssues) {
+      if (selectedIds.has(issue._id)) continue;
+      selected.push(issue);
+      selectedIds.add(issue._id);
+      if (selected.length >= 4) break;
+    }
+
+    return selected;
+  }, [issues, actionRequiredIssues]);
+
   const recommendedActions = useMemo(() => {
-    return actionRequiredIssues.slice(0, 4).map((issue) => ({
+    return recommendationSourceIssues.map((issue) => ({
       issue,
       recommendation: getNextBestAction(issue),
     }));
-  }, [actionRequiredIssues]);
+  }, [recommendationSourceIssues]);
 
   const recentIssues = useMemo(() => issues.slice(0, 5), [issues]);
 

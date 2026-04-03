@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ToastProvider";
@@ -61,9 +61,19 @@ type IssuesResponse = {
   };
 };
 
-type DashboardResponse = {
-  kpi?: { total: number; pending: number; inProgress: number; resolved: number };
-  alerts?: { unassigned: number; overdue: number; highPriorityPending: number };
+type DashboardDataResponse = {
+  workers?: Worker[];
+  stats?: {
+    issues?: number;
+    pending?: number;
+    inProgress?: number;
+    resolved?: number;
+    needsAttention?: {
+      unassigned?: number;
+      overdue?: number;
+      highPriorityPending?: number;
+    };
+  };
 };
 
 type ActionCounts = {
@@ -179,47 +189,48 @@ export default function DeptAdminIssuesPage() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const loadSummaryData = async () => {
+  const loadSummaryData = useCallback(async (signal?: AbortSignal) => {
     if (!auth) return;
 
     try {
-      const [workersRes, dashboardRes, unassignedRes, overdueRes] = await Promise.all([
-        authFetch("/api/dept-admin/workers", { method: "GET" }, auth.token),
-        authFetch("/api/dept-admin/dashboard", { method: "GET" }, auth.token),
-        authFetch("/api/dept-admin/issues?unassignedOnly=1&page=1&limit=1", { method: "GET" }, auth.token),
-        authFetch("/api/dept-admin/issues?overdueOnly=1&page=1&limit=1", { method: "GET" }, auth.token),
-      ]);
+      const response = (await authFetch(
+        "/api/dashboard?issuesLimit=1&includeReports=0",
+        { method: "GET", signal },
+        auth.token
+      )) as DashboardDataResponse;
 
-      const dashboard = dashboardRes as DashboardResponse;
-      const unassignedParsed = unassignedRes as IssuesResponse;
-      const overdueParsed = overdueRes as IssuesResponse;
+      if (signal?.aborted) return;
 
-      setWorkers(workersRes.workers || []);
+      const stats = response?.stats;
+      const attention = stats?.needsAttention;
 
-      if (dashboard.kpi) {
+      setWorkers(Array.isArray(response?.workers) ? response.workers : []);
+
+      if (stats) {
         setKpi({
-          total: dashboard.kpi.total || 0,
-          pending: dashboard.kpi.pending || 0,
-          inProgress: dashboard.kpi.inProgress || 0,
-          resolved: dashboard.kpi.resolved || 0,
+          total: Number(stats.issues || 0),
+          pending: Number(stats.pending || 0),
+          inProgress: Number(stats.inProgress || 0),
+          resolved: Number(stats.resolved || 0),
         });
       }
 
       setActionCounts({
-        unassigned: unassignedParsed.pagination?.total || dashboard.alerts?.unassigned || 0,
-        highPriority: dashboard.alerts?.highPriorityPending || 0,
-        overdue: overdueParsed.pagination?.total || dashboard.alerts?.overdue || 0,
+        unassigned: Number(attention?.unassigned || 0),
+        highPriority: Number(attention?.highPriorityPending || 0),
+        overdue: Number(attention?.overdue || 0),
       });
     } catch (err) {
+      if (signal?.aborted) return;
       showToast({
         title: "Load Failed",
         message: err instanceof Error ? err.message : "Failed to load summary data",
         variant: "error",
       });
     }
-  };
+  }, [auth, showToast]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async (signal?: AbortSignal) => {
     if (!auth) return;
     setLoading(true);
 
@@ -239,22 +250,31 @@ export default function DeptAdminIssuesPage() {
       if (overdueOnly) query.set("overdueOnly", "1");
       if (focusMode) query.set("focusMode", "1");
 
-      const issuesRes = await authFetch(`/api/dept-admin/issues?${query.toString()}`, { method: "GET" }, auth.token);
+      const issuesRes = await authFetch(
+        `/api/dept-admin/issues?${query.toString()}`,
+        { method: "GET", signal },
+        auth.token
+      );
+
+      if (signal?.aborted) return;
 
       const parsed = issuesRes as IssuesResponse;
       setTotalIssues(parsed.pagination?.total || 0);
       setIssues(parsed.issues || []);
 
     } catch (err) {
+      if (signal?.aborted) return;
       showToast({
         title: "Load Failed",
         message: err instanceof Error ? err.message : "Failed to load issues",
         variant: "error",
       });
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
-  };
+  }, [auth, category, debouncedSearch, focusMode, limit, overdueOnly, page, priority, sort, status, workerId, unassignedOnly, showToast]);
 
   useEffect(() => {
     setPage(1);
@@ -262,14 +282,16 @@ export default function DeptAdminIssuesPage() {
 
   useEffect(() => {
     if (!auth) return;
-    void loadSummaryData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth]);
+    const controller = new AbortController();
+    void loadSummaryData(controller.signal);
+    return () => controller.abort();
+  }, [auth, loadSummaryData]);
 
   useEffect(() => {
-    void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, status, priority, category, workerId, sort, unassignedOnly, overdueOnly, focusMode, page]);
+    const controller = new AbortController();
+    void loadData(controller.signal);
+    return () => controller.abort();
+  }, [loadData]);
 
   useEffect(() => {
     setSelectedIssueIds([]);
@@ -899,9 +921,15 @@ export default function DeptAdminIssuesPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-3 py-2.5">
+                          <td
+                            className="px-3 py-2.5"
+                            onClick={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                          >
                             <select
                               value={issue.priority || "Medium"}
+                              onClick={(event) => event.stopPropagation()}
+                              onMouseDown={(event) => event.stopPropagation()}
                               onChange={(event) => {
                                 const nextPriority = event.target.value as "Low" | "Medium" | "High" | "Urgent";
                                 void updatePriority(issue._id, nextPriority);

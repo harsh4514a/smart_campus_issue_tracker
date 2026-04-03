@@ -277,19 +277,52 @@ export async function POST(request: Request) {
     }
 
     try {
-      const adminRecipients = await getAdminRecipientEmails();
-      await sendIssueEventEmail({
-        event: "created",
-        to: adminRecipients,
-        issue: {
-          id: issue._id.toString(),
-          title: issue.title,
-          department: department?.name || null,
-          priority: issue.priority,
-          status: issue.status,
-        },
-        actorName: user.name,
-      });
+      const explicitDepartmentId = department?._id ? String(department._id) : "";
+      const issueDepartmentIds = explicitDepartmentId
+        ? [explicitDepartmentId]
+        : [finalDepartmentId, finalAcademicDepartmentId, finalServiceDepartmentId]
+            .map((value) => String(value || ""))
+            .filter(Boolean)
+            .filter((value, index, arr) => arr.indexOf(value) === index);
+
+      const adminRecipients = await getAdminRecipientEmails({ issueDepartmentIds });
+
+      if (adminRecipients.length > 0) {
+        await sendIssueEventEmail({
+          event: "created",
+          to: adminRecipients,
+          issue: {
+            id: issue._id.toString(),
+            title: issue.title,
+            department: department?.name || null,
+            priority: issue.priority,
+            status: issue.status,
+          },
+          actorName: user.name,
+        });
+      }
+
+      if (autoAssignResult.workerId) {
+        const autoAssignedWorker = await User.findById(autoAssignResult.workerId)
+          .select("email")
+          .lean<{ email?: string }>();
+
+        const workerEmail = String(autoAssignedWorker?.email || "").trim();
+        if (workerEmail) {
+          await sendIssueEventEmail({
+            event: "assigned",
+            to: [workerEmail],
+            issue: {
+              id: issue._id.toString(),
+              title: issue.title,
+              department: department?.name || null,
+              priority: issue.priority,
+              status: issue.status,
+            },
+            actorName: "Auto Assignment Engine",
+          });
+        }
+      }
     } catch (mailErr) {
       console.error("Issue created email error", mailErr);
     }
