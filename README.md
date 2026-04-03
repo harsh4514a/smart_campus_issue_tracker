@@ -149,38 +149,4 @@ Run development server:
  npm run dev
 ```
 
-## Demo Users (View Only)
 
-The app auto-creates four demo users when auth endpoints are used.
-These accounts are strictly read-only and cannot perform create/update/delete actions.
-No transactional or notification emails are sent to demo users.
-
-Student panel demo user:
-
-```text
-Email: demo.student@charusat.edu.in
-Password: DemoStudent@123
-```
-
-Worker (staff) panel demo user:
-
-```text
-Email: demo.worker@charusat.ac.in
-Password: DemoWorker@123
-```
-
-Admin panel demo user:
-
-```text
-Email: demo.admin@campustracker.com
-Password: DemoAdmin@123
-```
-
-Department Admin panel demo user:
-
-```text
-Email: demo.deptadmin@charusat.ac.in
-Password: DemoDeptAdmin@123
-```
-
-You can override these credentials through environment variables shown in env.example.
