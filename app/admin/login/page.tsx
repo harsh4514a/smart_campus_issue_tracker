@@ -1,10 +1,17 @@
 "use client";
 
 import { Suspense } from "react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getRedirectPath, loadAuth, saveAuth } from "@/lib/client-auth";
+
+const ENABLE_AUTH_DEBUG_LOGS = process.env.NODE_ENV !== "production";
+
+function logAdminLogin(event: string, details: Record<string, unknown>) {
+  if (!ENABLE_AUTH_DEBUG_LOGS) return;
+  console.debug("[AdminLogin]", event, details);
+}
 
 export default function AdminLoginPage() {
   return (
@@ -22,6 +29,8 @@ function AdminLoginContent() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<"loading" | "guest" | "authenticated">("loading");
+  const redirectTargetRef = useRef<string | null>(null);
 
   const redirectParam = searchParams.get("redirect") || "";
   const safeRedirect =
@@ -33,17 +42,41 @@ function AdminLoginContent() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (sessionStorage.getItem("isAdmin") === "true") {
-      const auth = loadAuth();
-      const target = auth?.user?.role === "admin"
-        ? getRedirectPath("admin", auth.user.adminRole)
-        : "/admin/login";
-      router.replace(target);
+
+    const auth = loadAuth();
+    const adminAuth = auth && auth.user.role === "admin" ? auth : null;
+
+    if (!adminAuth) {
+      if (sessionStorage.getItem("isAdmin") === "true") {
+        sessionStorage.removeItem("isAdmin");
+        logAdminLogin("stale-admin-flag-cleared", {});
+      }
+      setSessionStatus("guest");
+      logAdminLogin("session-status", { status: "guest" });
+      return;
     }
-  }, [router]);
+
+    setSessionStatus("authenticated");
+
+    const target = safeRedirect || getRedirectPath("admin", adminAuth.user.adminRole);
+    if (!target || target === "/admin/login") {
+      logAdminLogin("redirect-skip", { reason: "same-path", target });
+      return;
+    }
+
+    if (redirectTargetRef.current === target) {
+      logAdminLogin("redirect-skip", { reason: "duplicate", target });
+      return;
+    }
+
+    redirectTargetRef.current = target;
+    logAdminLogin("redirect", { target, reason: "already-authenticated" });
+    router.replace(target);
+  }, [router, safeRedirect]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (sessionStatus === "loading") return;
     setError(null);
     setSubmitting(true);
 
@@ -59,14 +92,22 @@ function AdminLoginContent() {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setError(data?.message || "Invalid credentials.");
+        logAdminLogin("login-failed", { status: res.status });
         return;
       }
 
       saveAuth({ token: data.token, user: data.user }, "session");
       sessionStorage.setItem("isAdmin", "true");
-      router.replace(safeRedirect || getRedirectPath(data.user.role, data.user.adminRole));
+      setSessionStatus("authenticated");
+
+      const target = safeRedirect || getRedirectPath(data.user.role, data.user.adminRole);
+      if (target && target !== "/admin/login") {
+        logAdminLogin("redirect", { target, reason: "post-login" });
+        router.replace(target);
+      }
     } catch {
       setError("Something went wrong. Please try again.");
+      logAdminLogin("login-error", { reason: "network-or-runtime" });
     } finally {
       setSubmitting(false);
     }
@@ -136,9 +177,9 @@ function AdminLoginContent() {
               <button
                 type="submit"
                 className="w-full rounded-xl bg-blue-600 text-white px-4 py-3 font-semibold transition shadow-sm hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-500/25 disabled:opacity-60 disabled:cursor-not-allowed"
-                disabled={submitting}
+                disabled={submitting || sessionStatus === "loading"}
               >
-                {submitting ? "Signing in..." : "Sign in"}
+                {submitting ? "Signing in..." : sessionStatus === "loading" ? "Checking session..." : "Sign in"}
               </button>
 
               <div className="flex items-center justify-center pt-1">

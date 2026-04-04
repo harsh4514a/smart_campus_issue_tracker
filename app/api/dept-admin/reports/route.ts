@@ -3,6 +3,7 @@ import connectDB from "@/lib/db";
 import Issue from "@/models/Issue";
 import Department from "@/models/Department";
 import { buildDepartmentScopeFilter, requireDeptAdmin } from "@/lib/dept-admin";
+import { getFromCache, setInCache } from "@/lib/server-cache";
 
 export async function GET(request: Request) {
   await connectDB();
@@ -15,6 +16,8 @@ export async function GET(request: Request) {
   const from = params.get("from");
   const to = params.get("to");
   const format = params.get("format");
+  const scopeKey = [...auth.departmentIds].sort().join(",") || "none";
+  const cacheKey = `dept-admin:reports:${auth.user._id}:${scopeKey}:${departmentId || "all"}:${category || "all"}:${from || "none"}:${to || "none"}`;
 
   if (from && Number.isNaN(new Date(from).getTime())) {
     return NextResponse.json({ message: "Invalid 'from' date." }, { status: 400 });
@@ -26,6 +29,50 @@ export async function GET(request: Request) {
 
   if (from && to && new Date(from).getTime() > new Date(to).getTime()) {
     return NextResponse.json({ message: "'from' date cannot be after 'to' date." }, { status: 400 });
+  }
+
+  const cachedPayload = getFromCache<Record<string, unknown>>(cacheKey);
+  if (cachedPayload) {
+    if (format === "csv") {
+      const metrics = (cachedPayload.metrics || {}) as {
+        total?: number;
+        resolutionRate?: number | null;
+        slaCompliance?: number;
+        unassigned?: number;
+      };
+      const alerts = (cachedPayload.alerts || {}) as {
+        highPriorityPending?: number;
+        overdue?: number;
+      };
+
+      const rows = [
+        ["Metric", "Value"],
+        ["Total Issues", String(metrics.total || 0)],
+        ["Resolution Rate (%)", metrics.resolutionRate == null ? "N/A" : String(metrics.resolutionRate)],
+        ["SLA Compliance (%)", String(metrics.slaCompliance || 0)],
+        ["Unassigned Issues", String(metrics.unassigned || 0)],
+        ["High Priority Pending", String(alerts.highPriorityPending || 0)],
+        ["Overdue Issues", String(alerts.overdue || 0)],
+      ];
+
+      const csv = rows
+        .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
+        .join("\n");
+
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename=dept-admin-report-${new Date().toISOString().slice(0, 10)}.csv`,
+        },
+      });
+    }
+
+    return NextResponse.json(cachedPayload, {
+      headers: {
+        "Cache-Control": "private, max-age=10, stale-while-revalidate=20",
+      },
+    });
   }
 
   const filter: Record<string, unknown> = {
@@ -284,6 +331,8 @@ export async function GET(request: Request) {
       .sort((a, b) => a.localeCompare(b)),
   };
 
+  setInCache(cacheKey, payload, 20_000);
+
   if (format === "csv") {
     const rows = [
       ["Metric", "Value"],
@@ -308,5 +357,9 @@ export async function GET(request: Request) {
     });
   }
 
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "private, max-age=10, stale-while-revalidate=20",
+    },
+  });
 }

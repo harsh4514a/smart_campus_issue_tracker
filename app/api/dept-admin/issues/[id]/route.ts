@@ -124,6 +124,9 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     deleteFromCacheByPrefix("dept-admin:dashboard:");
     deleteFromCacheByPrefix("dept-admin:workers:");
+    deleteFromCacheByPrefix("dept-admin:notifications:");
+    deleteFromCacheByPrefix("dept-admin:issues:");
+    deleteFromCacheByPrefix("dept-admin:reports:");
 
     return NextResponse.json({ message: `Priority updated to ${targetPriority}`, issue: updatedIssue });
   } catch (error) {
@@ -153,6 +156,9 @@ export async function DELETE(request: Request, context: RouteContext) {
 
   deleteFromCacheByPrefix("dept-admin:dashboard:");
   deleteFromCacheByPrefix("dept-admin:workers:");
+  deleteFromCacheByPrefix("dept-admin:notifications:");
+  deleteFromCacheByPrefix("dept-admin:issues:");
+  deleteFromCacheByPrefix("dept-admin:reports:");
 
   return NextResponse.json({ message: "Issue deleted successfully." });
 }

@@ -84,7 +84,20 @@ export function useStaffIssues(options: UseStaffIssuesOptions = {}) {
   const load = useCallback(
     (silent = false) => {
       const auth = loadAuth();
-      if (!auth) return Promise.resolve();
+      if (!auth) {
+        activeControllerRef.current?.abort();
+        activeControllerRef.current = null;
+        setIssues([]);
+        setMeta((prev) => ({
+          ...prev,
+          totalItems: 0,
+          totalPages: 1,
+          currentPage: 1,
+        }));
+        setError(null);
+        setLoading(false);
+        return Promise.resolve();
+      }
 
       if (!silent) {
         setLoading(true);
@@ -144,8 +157,8 @@ export function useStaffIssues(options: UseStaffIssuesOptions = {}) {
       }
     };
 
-    window.addEventListener("visibilitychange", onVisibilityChange);
-    return () => window.removeEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [load]);
 
   useEffect(() => {

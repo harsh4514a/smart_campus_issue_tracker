@@ -5,7 +5,7 @@ import User from "@/models/User";
 import { sendOtpEmail } from "@/lib/mailer";
 import { createOtpRecord, normalizeEmail } from "@/lib/otp-service";
 
-const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$/;
 
 export async function POST(request: Request) {
@@ -20,8 +20,8 @@ export async function POST(request: Request) {
 
     const normalizedEmail = normalizeEmail(email);
 
-    if (!collegeEmailRegex.test(normalizedEmail)) {
-      return NextResponse.json({ message: "Please use your college email." }, { status: 400 });
+    if (!emailRegex.test(normalizedEmail)) {
+      return NextResponse.json({ message: "Please enter a valid email address." }, { status: 400 });
     }
 
     if (!passwordRegex.test(password)) {

@@ -12,10 +12,11 @@ export async function GET(request: Request) {
   if (auth instanceof Response) return auth;
 
   const params = new URL(request.url).searchParams;
+  const view = (params.get("view") || "full").trim().toLowerCase();
   const search = (params.get("search") || "").trim();
   const departmentId = (params.get("departmentId") || "all").trim();
   const sort = (params.get("sort") || "name").trim();
-  const cacheKey = `dept-admin:workers:${auth.user._id}:${[...auth.departmentIds].sort().join(",")}:${search}:${departmentId}:${sort}`;
+  const cacheKey = `dept-admin:workers:${view}:${auth.user._id}:${[...auth.departmentIds].sort().join(",")}:${search}:${departmentId}:${sort}`;
 
   const cachedResponse = await getOrSetCache(cacheKey, 15_000, async () => {
     const scopedDepartmentIds =
@@ -45,6 +46,36 @@ export async function GET(request: Request) {
           ],
         },
       ];
+    }
+
+    if (view === "issues") {
+      const workers = await User.find(workerFilter)
+        .select("_id name email designation department academicDepartment serviceDepartment managedDepartments")
+        .populate("department", "_id name type")
+        .populate("academicDepartment", "_id name type")
+        .populate("serviceDepartment", "_id name type")
+        .populate("managedDepartments", "_id name type")
+        .sort({ name: 1 })
+        .lean();
+
+      const departments = await Department.find({ _id: { $in: auth.departmentIds } })
+        .select("_id name type")
+        .sort({ name: 1 })
+        .lean();
+
+      return {
+        workers: workers.map((worker) => ({
+          _id: String(worker._id),
+          name: worker.name,
+          email: worker.email,
+          designation: worker.designation || null,
+          department: worker.department || null,
+          academicDepartment: worker.academicDepartment || null,
+          serviceDepartment: worker.serviceDepartment || null,
+          managedDepartments: Array.isArray(worker.managedDepartments) ? worker.managedDepartments : [],
+        })),
+        departments,
+      };
     }
 
     const workers = await User.find(workerFilter)

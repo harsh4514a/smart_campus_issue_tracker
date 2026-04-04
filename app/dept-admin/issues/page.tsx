@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ToastProvider";
@@ -61,19 +61,22 @@ type IssuesResponse = {
   };
 };
 
-type DashboardDataResponse = {
-  workers?: Worker[];
-  stats?: {
-    issues?: number;
+type DashboardSummaryResponse = {
+  kpi?: {
+    total?: number;
     pending?: number;
     inProgress?: number;
     resolved?: number;
-    needsAttention?: {
-      unassigned?: number;
-      overdue?: number;
-      highPriorityPending?: number;
-    };
   };
+  alerts?: {
+    unassigned?: number;
+    overdue?: number;
+    highPriorityPending?: number;
+  };
+};
+
+type WorkersListResponse = {
+  workers?: Worker[];
 };
 
 type ActionCounts = {
@@ -140,6 +143,14 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function DeptAdminIssuesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <DeptAdminIssuesPageContent />
+    </Suspense>
+  );
+}
+
+function DeptAdminIssuesPageContent() {
   const auth = useMemo(() => loadAuth(), []);
   const router = useRouter();
   const params = useSearchParams();
@@ -193,22 +204,23 @@ export default function DeptAdminIssuesPage() {
     if (!auth) return;
 
     try {
-      const response = (await authFetch(
-        "/api/dashboard?issuesLimit=1&includeReports=0",
-        { method: "GET", signal },
-        auth.token
-      )) as DashboardDataResponse;
+      const [summaryResponse, workersResponse] = await Promise.all([
+        authFetch("/api/dept-admin/dashboard?view=summary", { method: "GET", signal }, auth.token),
+        authFetch("/api/dept-admin/workers?view=issues", { method: "GET", signal }, auth.token),
+      ]);
 
       if (signal?.aborted) return;
 
-      const stats = response?.stats;
-      const attention = stats?.needsAttention;
+      const summary = summaryResponse as DashboardSummaryResponse;
+      const workersPayload = workersResponse as WorkersListResponse;
+      const stats = summary?.kpi;
+      const alerts = summary?.alerts;
 
-      setWorkers(Array.isArray(response?.workers) ? response.workers : []);
+      setWorkers(Array.isArray(workersPayload?.workers) ? workersPayload.workers : []);
 
       if (stats) {
         setKpi({
-          total: Number(stats.issues || 0),
+          total: Number(stats.total || 0),
           pending: Number(stats.pending || 0),
           inProgress: Number(stats.inProgress || 0),
           resolved: Number(stats.resolved || 0),
@@ -216,9 +228,9 @@ export default function DeptAdminIssuesPage() {
       }
 
       setActionCounts({
-        unassigned: Number(attention?.unassigned || 0),
-        highPriority: Number(attention?.highPriorityPending || 0),
-        overdue: Number(attention?.overdue || 0),
+        unassigned: Number(alerts?.unassigned || 0),
+        highPriority: Number(alerts?.highPriorityPending || 0),
+        overdue: Number(alerts?.overdue || 0),
       });
     } catch (err) {
       if (signal?.aborted) return;

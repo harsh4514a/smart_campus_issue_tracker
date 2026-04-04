@@ -8,22 +8,10 @@ import { Pencil, Plus, Trash2, X } from "lucide-react";
 
 type DepartmentType = "Academic" | "Service";
 type Department = { _id: string; name: string; type: DepartmentType; createdAt?: string };
-type IssueLite = {
-  _id: string;
-  status: "Pending" | "In Progress" | "Resolved" | "Rejected";
-  department?: { _id?: string } | null;
-  academicDepartment?: { _id?: string } | null;
-  serviceDepartment?: { _id?: string } | null;
-};
-
-type StaffLite = {
-  _id: string;
-  department?: { _id?: string } | null;
-  academicDepartment?: { _id?: string } | null;
-  serviceDepartment?: { _id?: string } | null;
-  managedDepartments?: Array<{ _id?: string }>;
-};
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 30000;
+const ENABLE_ADMIN_AUTO_REFRESH = false;
+const DEPARTMENT_LIST_ENDPOINT = "/api/admin/departments?view=list";
+const DEPARTMENT_METRICS_ENDPOINT = "/api/admin/metrics?scope=departments";
 
 export default function AdminDepartmentsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -58,41 +46,16 @@ export default function AdminDepartmentsPage() {
     }
 
     Promise.all([
-      authFetch("/api/admin/departments", { method: "GET" }, auth.token),
-      authFetch("/api/admin/issues", { method: "GET" }, auth.token),
-      authFetch("/api/admin/staff", { method: "GET" }, auth.token),
+      authFetch(DEPARTMENT_LIST_ENDPOINT, { method: "GET" }, auth.token),
+      authFetch(DEPARTMENT_METRICS_ENDPOINT, { method: "GET" }, auth.token),
     ])
-      .then(([departmentRes, issueRes, staffRes]) => {
+      .then(([departmentRes, metricsRes]) => {
         const departmentRows = departmentRes.departments || [];
         setDepartments(departmentRows);
-
-        const issueRows = (issueRes.issues || []) as IssueLite[];
-        const issueMap: Record<string, number> = {};
-        issueRows.forEach((issue) => {
-          if (issue.status === "Resolved" || issue.status === "Rejected") return;
-          const departmentId =
-            String(issue.serviceDepartment?._id || "") ||
-            String(issue.academicDepartment?._id || "") ||
-            String(issue.department?._id || "");
-          if (!departmentId) return;
-          issueMap[departmentId] = (issueMap[departmentId] || 0) + 1;
-        });
-        setActiveIssueByDept(issueMap);
-
-        const staffRows = (staffRes.faculty || []) as StaffLite[];
-        const staffMap: Record<string, number> = {};
-        staffRows.forEach((staff) => {
-          const ids = new Set<string>([
-            String(staff.department?._id || ""),
-            String(staff.academicDepartment?._id || ""),
-            String(staff.serviceDepartment?._id || ""),
-            ...(Array.isArray(staff.managedDepartments) ? staff.managedDepartments.map((dept) => String(dept?._id || "")) : []),
-          ].filter(Boolean));
-          ids.forEach((id) => {
-            staffMap[id] = (staffMap[id] || 0) + 1;
-          });
-        });
-        setStaffByDept(staffMap);
+        setActiveIssueByDept(
+          (metricsRes?.activeIssueByDepartment || {}) as Record<string, number>
+        );
+        setStaffByDept((metricsRes?.staffByDepartment || {}) as Record<string, number>);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load departments"))
       .finally(() => {
@@ -108,9 +71,9 @@ export default function AdminDepartmentsPage() {
   }, []);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!ENABLE_ADMIN_AUTO_REFRESH || !auth) return;
     const intervalId = window.setInterval(() => {
-      if (!saving && !deletingId && !editingId && !showCreateForm) {
+      if (!saving && !deletingId && !editingId && !showCreateForm && !document.hidden) {
         load(true);
       }
     }, POLL_INTERVAL_MS);

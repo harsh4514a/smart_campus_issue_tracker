@@ -66,6 +66,7 @@ const IssueSchema = new Schema<IIssue>(
 );
 
 // Query indexes for issue list filtering/sorting in admin and department-admin views.
+IssueSchema.index({ createdAt: -1 });
 IssueSchema.index({ status: 1, createdAt: -1 });
 IssueSchema.index({ status: 1, priority: 1, createdAt: -1 });
 IssueSchema.index({ priority: 1, createdAt: -1 });
@@ -77,6 +78,8 @@ IssueSchema.index({ academicDepartment: 1, status: 1, priority: 1, createdAt: -1
 IssueSchema.index({ serviceDepartment: 1, status: 1, priority: 1, createdAt: -1 });
 IssueSchema.index({ category: 1, createdAt: -1 });
 IssueSchema.index({ assignedStaff: 1, status: 1, createdAt: -1 });
+IssueSchema.index({ student: 1, createdAt: -1 });
+IssueSchema.index({ status: 1, createdAt: -1, student: 1 });
 
 const cachedIssueModel = mongoose.models.Issue as Model<IIssue> | undefined;
 

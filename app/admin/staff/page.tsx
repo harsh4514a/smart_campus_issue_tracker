@@ -22,13 +22,11 @@ type Faculty = {
   createdAt?: string;
 };
 
-type IssueLite = {
-  _id: string;
-  status: "Pending" | "In Progress" | "Resolved" | "Rejected";
-  assignedStaff?: { _id?: string } | null;
-};
-
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 30000;
+const ENABLE_ADMIN_AUTO_REFRESH = false;
+const STAFF_DEPARTMENTS_ENDPOINT = "/api/admin/departments?view=issues";
+const STAFF_LIST_ENDPOINT = "/api/admin/staff?view=staff-page";
+const STAFF_METRICS_ENDPOINT = "/api/admin/metrics?scope=staff";
 
 export default function AdminStaffPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -57,7 +55,7 @@ export default function AdminStaffPage() {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { showToast } = useToast();
 
-  const auth = loadAuth();
+  const auth = useMemo(() => loadAuth(), []);
 
   useEffect(() => {
     document.title = "Staff | CampusTracker Admin";
@@ -70,11 +68,11 @@ export default function AdminStaffPage() {
     }
 
     Promise.all([
-      authFetch("/api/admin/departments", { method: "GET" }, auth.token),
-      authFetch("/api/admin/staff", { method: "GET" }, auth.token),
-      authFetch("/api/admin/issues", { method: "GET" }, auth.token),
+      authFetch(STAFF_DEPARTMENTS_ENDPOINT, { method: "GET" }, auth.token),
+      authFetch(STAFF_LIST_ENDPOINT, { method: "GET" }, auth.token),
+      authFetch(STAFF_METRICS_ENDPOINT, { method: "GET" }, auth.token),
     ])
-      .then(([deptRes, staffRes, issueRes]) => {
+      .then(([deptRes, staffRes, metricsRes]) => {
         setDepartments(deptRes.departments || []);
         const allStaff = (staffRes.faculty || []) as Faculty[];
         setFaculty(
@@ -82,16 +80,7 @@ export default function AdminStaffPage() {
             ? allStaff.filter((item) => !item.isDemoUser)
             : allStaff
         );
-
-        const issues = (issueRes.issues || []) as IssueLite[];
-        const nextMap: Record<string, number> = {};
-        issues.forEach((issue) => {
-          const staffId = String(issue.assignedStaff?._id || "");
-          if (!staffId) return;
-          if (issue.status === "Resolved" || issue.status === "Rejected") return;
-          nextMap[staffId] = (nextMap[staffId] || 0) + 1;
-        });
-        setActiveIssueMap(nextMap);
+        setActiveIssueMap((metricsRes?.activeIssueByStaff || {}) as Record<string, number>);
       })
       .catch((err) =>
         showToast({
@@ -113,9 +102,9 @@ export default function AdminStaffPage() {
   }, []);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!ENABLE_ADMIN_AUTO_REFRESH || !auth) return;
     const intervalId = window.setInterval(() => {
-      if (!saving && !statusActionSubmitting && !showForm) {
+      if (!saving && !statusActionSubmitting && !showForm && !document.hidden) {
         loadData(true);
       }
     }, POLL_INTERVAL_MS);

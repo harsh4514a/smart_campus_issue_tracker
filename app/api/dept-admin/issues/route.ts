@@ -3,6 +3,7 @@ import connectDB from "@/lib/db";
 import Issue from "@/models/Issue";
 import User from "@/models/User";
 import { buildDepartmentScopeFilter, requireDeptAdmin } from "@/lib/dept-admin";
+import { getFromCache, setInCache } from "@/lib/server-cache";
 
 const ISSUE_LIST_SELECT =
   "title category tags priority status createdAt dueDate student department academicDepartment serviceDepartment assignedStaff";
@@ -36,6 +37,20 @@ export async function GET(request: Request) {
   const dateTo = params.get("dateTo") || params.get("to");
   const page = parsePositiveInt(params.get("page"), 1, 99999);
   const limit = parsePositiveInt(params.get("limit"), 20, 100);
+  const scopeKey = [...auth.departmentIds].sort().join(",") || "none";
+  const canUseCache = search.length === 0;
+  const cacheKey = `dept-admin:issues:${auth.user._id}:${scopeKey}:${params.toString() || "default"}`;
+
+  if (canUseCache) {
+    const cachedPayload = getFromCache<Record<string, unknown>>(cacheKey);
+    if (cachedPayload) {
+      return NextResponse.json(cachedPayload, {
+        headers: {
+          "Cache-Control": "private, max-age=6, stale-while-revalidate=12",
+        },
+      });
+    }
+  }
 
   const filter: Record<string, unknown> = {
     ...buildDepartmentScopeFilter(auth.departmentIds, departmentId),
@@ -227,13 +242,23 @@ export async function GET(request: Request) {
 
   const [total, issues] = await Promise.all([totalPromise, issuesPromise]);
 
-  return NextResponse.json({
+  const payload = {
     issues,
     pagination: {
       page,
       limit,
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+  };
+
+  if (canUseCache) {
+    setInCache(cacheKey, payload, 8_000);
+  }
+
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "private, max-age=6, stale-while-revalidate=12",
     },
   });
 }

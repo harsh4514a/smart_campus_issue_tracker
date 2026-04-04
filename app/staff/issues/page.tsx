@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -56,6 +57,14 @@ const INITIAL_VISIBLE_ROWS = 20;
 const ROW_BATCH_SIZE = 15;
 
 export default function StaffIssuesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <StaffIssuesPageContent />
+    </Suspense>
+  );
+}
+
+function StaffIssuesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { showToast } = useToast();

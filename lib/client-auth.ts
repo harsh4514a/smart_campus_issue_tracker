@@ -132,6 +132,29 @@ export async function authFetch(url: string, options: RequestInit = {}, token?: 
   headers.set("Pragma", headers.get("Pragma") || "no-cache");
   headers.set("Expires", headers.get("Expires") || "0");
 
+  if (
+    typeof window !== "undefined" &&
+    process.env.NODE_ENV !== "production" &&
+    (url.startsWith("/api/admin") || url.startsWith("/api/dashboard"))
+  ) {
+    const debugWindow = window as Window & {
+      __scitRequestCounts?: Record<string, number>;
+    };
+    const method = (options.method || "GET").toUpperCase();
+    const requestKey = `${method} ${url}`;
+    const currentCounts = debugWindow.__scitRequestCounts || {};
+    const nextCount = (currentCounts[requestKey] || 0) + 1;
+    debugWindow.__scitRequestCounts = {
+      ...currentCounts,
+      [requestKey]: nextCount,
+    };
+    console.debug("[authFetch]", {
+      request: requestKey,
+      count: nextCount,
+      ts: new Date().toISOString(),
+    });
+  }
+
   const res = await fetch(url, {
     ...options,
     headers,

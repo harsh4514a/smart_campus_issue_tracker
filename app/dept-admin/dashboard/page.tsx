@@ -28,7 +28,6 @@ const MAX_RECENT_ACTIVITY_ITEMS = 8;
 const MAX_CRITICAL_ITEMS = 10;
 const MAX_WORKER_ITEMS = 12;
 const MAX_DISTRIBUTION_ITEMS = 8;
-const MAX_TREND_POINTS = 14;
 
 type Department = { _id: string; name: string; type?: string };
 
@@ -54,17 +53,19 @@ type DashboardResponse = {
     overdue: boolean;
   }>;
   workerSummary: Array<{ _id: string; name: string; activeTasks: number; availability: "Available" | "Moderate" | "Overloaded" }>;
-  trend: Array<{ _id: string; count: number }>;
+  trend: Array<{ date: string; created: number; resolved: number }>;
   distribution: Array<{ _id: string; count: number }>;
   departments: Department[];
 };
 
 export default function DeptAdminDashboardPage() {
   const auth = useMemo(() => loadAuth(), []);
-  const [data, setData] = useState<DashboardResponse | null>(null);
+  const [rawData, setRawData] = useState<DashboardResponse | null>(null);
   const [departmentId, setDepartmentId] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const data = rawData;
 
   const quickSuggestions = useMemo(() => {
     if (!data) return [] as Array<{ id: string; label: string; href: string; className: string }>;
@@ -119,54 +120,6 @@ export default function DeptAdminDashboardPage() {
     return suggestions.slice(0, 3);
   }, [data]);
 
-  const trendChartData = useMemo(() => {
-    if (!data?.trend?.length) {
-      return [] as Array<{
-        issues: number;
-        movingAvg: number;
-        shortDate: string;
-        fullDate: string;
-      }>;
-    }
-
-    const sorted = data.trend
-      .map((row) => {
-        const parsedDate = new Date(String(row._id));
-        const time = parsedDate.getTime();
-
-        return {
-          rawDate: String(row._id),
-          dateObj: Number.isNaN(time) ? null : parsedDate,
-          sortKey: Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time,
-          issues: Number(row.count) || 0,
-        };
-      })
-      .sort((a, b) => a.sortKey - b.sortKey)
-      .slice(-MAX_TREND_POINTS);
-
-    return sorted.map((point, index, allPoints) => {
-      const prev = allPoints[index - 1]?.issues ?? point.issues;
-      const next = allPoints[index + 1]?.issues ?? point.issues;
-      const movingAvg = Number(((prev + point.issues + next) / 3).toFixed(2));
-
-      return {
-        issues: point.issues,
-        movingAvg,
-        shortDate: point.dateObj
-          ? point.dateObj.toLocaleDateString(undefined, { day: "2-digit", month: "short" })
-          : point.rawDate,
-        fullDate: point.dateObj
-          ? point.dateObj.toLocaleDateString(undefined, {
-              weekday: "short",
-              day: "2-digit",
-              month: "long",
-              year: "numeric",
-            })
-          : point.rawDate,
-      };
-    });
-  }, [data?.trend]);
-
   const loadDashboard = useCallback(async (signal?: AbortSignal) => {
     if (!auth) return;
 
@@ -174,14 +127,17 @@ export default function DeptAdminDashboardPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (departmentId !== "all") params.set("departmentId", departmentId);
+      if (departmentId !== "all") {
+        params.set("departmentId", departmentId);
+      }
+
       const res = await authFetch(
-        `/api/dept-admin/dashboard?${params.toString()}`,
+        `/api/dept-admin/dashboard${params.toString() ? `?${params.toString()}` : ""}`,
         { method: "GET", signal },
         auth.token
       );
       if (!signal?.aborted) {
-        setData(res as DashboardResponse);
+        setRawData(res as DashboardResponse);
       }
     } catch (err) {
       if (signal?.aborted) return;
@@ -393,11 +349,11 @@ export default function DeptAdminDashboardPage() {
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700"><Zap className="h-4 w-4 text-teal-600" /> Issue Trend (Last 7 days)</h3>
-              <div className="mt-3 h-72">
-                <IssueTrendChart data={trendChartData} />
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700"><Zap className="h-4 w-4 text-teal-600" /> Issue Operations Trend</h3>
+              <div className="mt-3 h-96">
+                <IssueTrendChart data={data.trend || []} />
               </div>
-              <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500"><CalendarRange className="h-3.5 w-3.5" /> Bars show daily issue count; line shows smoothed 3-day trend.</p>
+              <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500"><CalendarRange className="h-3.5 w-3.5" /> Use the toggle to inspect daily activity and backlog movement over 7 or 30 days.</p>
             </section>
           </>
         ) : null}

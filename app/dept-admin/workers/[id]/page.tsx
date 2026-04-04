@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, RefreshCcw } from "lucide-react";
 import DeptAdminShell from "@/components/dept-admin/DeptAdminShell";
 import { authFetch, loadAuth } from "@/lib/client-auth";
@@ -38,6 +38,14 @@ type WorkerDetailResponse = {
 };
 
 export default function DeptAdminWorkerProfilePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <DeptAdminWorkerProfilePageContent />
+    </Suspense>
+  );
+}
+
+function DeptAdminWorkerProfilePageContent() {
   const auth = useMemo(() => loadAuth(), []);
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();

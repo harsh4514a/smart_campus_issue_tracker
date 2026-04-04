@@ -151,13 +151,23 @@ export default function DeptAdminIssueDetailPage() {
     });
   }, [issue, workers]);
 
+  const refreshIssue = async () => {
+    if (!auth || !issueId) return;
+
+    const issueRes = await authFetch(`/api/dept-admin/issues/${issueId}`, { method: "GET" }, auth.token);
+    setIssue(issueRes.issue || null);
+    setLogs(issueRes.logs || []);
+    setWorkerId(issueRes.issue?.assignedStaff?._id || "");
+    setNextPriority(normalizePriority(issueRes.issue?.priority));
+  };
+
   const load = async () => {
     if (!auth || !issueId) return;
     setLoading(true);
     try {
       const [issueRes, workersRes] = await Promise.all([
         authFetch(`/api/dept-admin/issues/${issueId}`, { method: "GET" }, auth.token),
-        authFetch("/api/dept-admin/workers", { method: "GET" }, auth.token),
+        authFetch("/api/dept-admin/workers?view=issues", { method: "GET" }, auth.token),
       ]);
 
       setIssue(issueRes.issue || null);
@@ -187,7 +197,7 @@ export default function DeptAdminIssueDetailPage() {
         auth.token
       );
       showToast({ title: "Success", message: res.message || "Assigned", variant: "success" });
-      await load();
+      await refreshIssue();
     } catch (err) {
       showToast({ title: "Assign Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {
@@ -209,7 +219,7 @@ export default function DeptAdminIssueDetailPage() {
         auth.token
       );
       showToast({ title: "Success", message: res.message || "Updated", variant: "success" });
-      await load();
+      await refreshIssue();
     } catch (err) {
       showToast({ title: "Status Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {
@@ -228,7 +238,7 @@ export default function DeptAdminIssueDetailPage() {
         auth.token
       );
       showToast({ title: "Success", message: res.message || `Priority updated to ${nextPriority}`, variant: "success" });
-      await load();
+      await refreshIssue();
     } catch (err) {
       showToast({ title: "Priority Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {
@@ -247,7 +257,7 @@ export default function DeptAdminIssueDetailPage() {
       );
       showToast({ title: "Success", message: res.message || "Updated", variant: "success" });
       setShowRejectConfirm(false);
-      await load();
+      await refreshIssue();
     } catch (err) {
       showToast({ title: "Status Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {

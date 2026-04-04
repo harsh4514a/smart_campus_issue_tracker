@@ -23,6 +23,9 @@ export async function GET(request: Request) {
   }
 
   const searchParams = new URL(request.url).searchParams;
+  const requestedView = (searchParams.get("view") || "").trim().toLowerCase();
+  const isIssuesView = requestedView === "issues";
+  const isStaffPageView = requestedView === "staff-page";
   const includeAdminRoles = searchParams.get("includeAdminRoles") === "1";
   const statusParam = searchParams.get("status")?.trim().toLowerCase();
 
@@ -54,12 +57,32 @@ export async function GET(request: Request) {
     query.isDemoUser = { $ne: true };
   }
 
-  const staff = await User.find(query)
-    .populate("department")
-    .populate("academicDepartment")
-    .populate("serviceDepartment")
-    .populate("managedDepartments")
-    .sort({ name: 1 });
+  let staffQuery = User.find(query).sort({ name: 1 });
+
+  if (isIssuesView) {
+    staffQuery = staffQuery
+      .select("_id name email department academicDepartment serviceDepartment")
+      .populate("department", "_id name")
+      .populate("academicDepartment", "_id name")
+      .populate("serviceDepartment", "_id name");
+  } else if (isStaffPageView) {
+    staffQuery = staffQuery
+      .select(
+        "_id name email role isActive isDemoUser createdAt department academicDepartment serviceDepartment managedDepartments"
+      )
+      .populate("department", "_id name type")
+      .populate("academicDepartment", "_id name type")
+      .populate("serviceDepartment", "_id name type")
+      .populate("managedDepartments", "_id name type");
+  } else {
+    staffQuery = staffQuery
+      .populate("department")
+      .populate("academicDepartment")
+      .populate("serviceDepartment")
+      .populate("managedDepartments");
+  }
+
+  const staff = await staffQuery.lean();
   return NextResponse.json({ faculty: staff });
 }
 

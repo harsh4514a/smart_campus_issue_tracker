@@ -6,6 +6,8 @@ import { getDepartmentScopedIssueFilter } from "@/lib/rbac";
 
 const ISSUE_SELECT_FULL =
   "title description imageUrl attachments resolutionAttachments category status location createdAt updatedAt dueDate priority recurring student department academicDepartment serviceDepartment assignedStaff";
+const ISSUE_SELECT_TRIAGE =
+  "title description category status location createdAt updatedAt dueDate priority recurring student department academicDepartment serviceDepartment assignedStaff";
 const ISSUE_SELECT_REPORTS =
   "title category status location createdAt updatedAt priority recurring student assignedStaff department academicDepartment serviceDepartment";
 const ISSUE_SELECT_DASHBOARD =
@@ -26,7 +28,10 @@ export async function GET(request: Request) {
 
   const params = new URL(request.url).searchParams;
   const requestedView = (params.get("view") || "full").trim().toLowerCase();
-  const view = requestedView === "dashboard" || requestedView === "reports" ? requestedView : "full";
+  const view =
+    requestedView === "dashboard" || requestedView === "reports" || requestedView === "triage"
+      ? requestedView
+      : "full";
   const requestedLimit = parsePositiveInt(params.get("limit"), 0, 5000);
 
   const limit =
@@ -34,11 +39,15 @@ export async function GET(request: Request) {
       ? requestedLimit || 120
       : view === "reports"
         ? requestedLimit || 1500
+        : view === "triage"
+          ? requestedLimit
         : requestedLimit;
 
   const selectClause =
     view === "dashboard"
       ? ISSUE_SELECT_DASHBOARD
+      : view === "triage"
+        ? ISSUE_SELECT_TRIAGE
       : view === "reports"
         ? ISSUE_SELECT_REPORTS
         : ISSUE_SELECT_FULL;

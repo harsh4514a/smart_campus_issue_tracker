@@ -25,6 +25,91 @@ function getTrendDirection(current: number, previous: number) {
   return "flat" as const;
 }
 
+type DashboardIssueRow = {
+  _id: string;
+  title?: string;
+  category?: string;
+  status?: "Pending" | "In Progress" | "Resolved" | "Rejected" | string;
+  location?: string;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  dueDate?: Date | string | null;
+  priority?: "Low" | "Medium" | "High" | "Urgent" | null;
+  recurring?: boolean;
+  student?: { name?: string; email?: string };
+  assignedStaff?: { _id?: string; name?: string; email?: string } | null;
+  department?: { _id?: string; name?: string; type?: "Academic" | "Service" } | null;
+  academicDepartment?: { _id?: string; name?: string; type?: "Academic" | "Service" } | null;
+  serviceDepartment?: { _id?: string; name?: string; type?: "Academic" | "Service" } | null;
+};
+
+function toTimestamp(value: unknown) {
+  if (!value) return null;
+  const ts = new Date(String(value)).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function toIsoString(value: unknown) {
+  const ts = toTimestamp(value);
+  if (ts === null) return null;
+  return new Date(ts).toISOString();
+}
+
+function buildDashboardNotifications(issues: DashboardIssueRow[], limit: number) {
+  return issues
+    .map((issue) => {
+      const title = issue.title || "Issue";
+      const status = issue.status || "Pending";
+      const hasAssignee = Boolean(issue.assignedStaff?._id);
+      const dueTs = toTimestamp(issue.dueDate);
+      const nowTs = Date.now();
+      const isOverdue =
+        dueTs !== null &&
+        dueTs < nowTs &&
+        status !== "Resolved" &&
+        status !== "Rejected";
+
+      if (status === "Resolved") {
+        return {
+          id: `resolved-${issue._id}`,
+          issueId: issue._id,
+          message: `${title} - resolved by ${issue.assignedStaff?.name || "staff"}`,
+          tone: "green" as const,
+          timestamp: toIsoString(issue.updatedAt || issue.createdAt),
+        };
+      }
+
+      if (isOverdue) {
+        return {
+          id: `overdue-${issue._id}`,
+          issueId: issue._id,
+          message: `${title} - overdue and needs immediate action`,
+          tone: "indigo" as const,
+          timestamp: toIsoString(issue.updatedAt || issue.createdAt),
+        };
+      }
+
+      if (hasAssignee) {
+        return {
+          id: `assigned-${issue._id}`,
+          issueId: issue._id,
+          message: `${title} - assigned to ${issue.assignedStaff?.name || "staff"}`,
+          tone: "indigo" as const,
+          timestamp: toIsoString(issue.updatedAt || issue.createdAt),
+        };
+      }
+
+      return {
+        id: `reported-${issue._id}`,
+        issueId: issue._id,
+        message: `${title} - reported by ${issue.student?.name || "student"}`,
+        tone: "teal" as const,
+        timestamp: toIsoString(issue.updatedAt || issue.createdAt),
+      };
+    })
+    .slice(0, limit);
+}
+
 export async function GET(request: Request) {
   await connectDB();
 
@@ -32,15 +117,27 @@ export async function GET(request: Request) {
   if (auth instanceof Response) return auth;
 
   const params = new URL(request.url).searchParams;
-  const issuesLimit = parsePositiveInt(params.get("issuesLimit"), 120, 5000);
+  const issuesLimit = parsePositiveInt(params.get("issuesLimit"), 10, 200);
+  const recentIssuesLimit = parsePositiveInt(
+    params.get("recentIssuesLimit"),
+    Math.min(issuesLimit, 10),
+    20
+  );
+  const notificationsLimit = parsePositiveInt(
+    params.get("notificationsLimit"),
+    10,
+    20
+  );
   const includeIssues = params.get("includeIssues") !== "0";
+  const includeRecentIssues = params.get("includeRecentIssues") !== "0";
+  const includeNotifications = params.get("includeNotifications") !== "0";
   const includeWorkers = params.get("includeWorkers") !== "0";
   const includeReports = params.get("includeReports") !== "0";
 
   const issueScopeFilter = getDepartmentScopedIssueFilter(auth.user);
   const scopeIds = getAdminDepartmentIds(auth.user);
   const scopeKey = isSuperAdmin(auth.user) ? "all" : scopeIds.sort().join(",") || "none";
-  const cacheKey = `dashboard-data:${auth.user._id}:${scopeKey}:${issuesLimit}:${includeIssues ? 1 : 0}:${includeWorkers ? 1 : 0}:${includeReports ? 1 : 0}`;
+  const cacheKey = `dashboard-data:${auth.user._id}:${scopeKey}:${issuesLimit}:${recentIssuesLimit}:${notificationsLimit}:${includeIssues ? 1 : 0}:${includeRecentIssues ? 1 : 0}:${includeNotifications ? 1 : 0}:${includeWorkers ? 1 : 0}:${includeReports ? 1 : 0}`;
 
   try {
     const payload = await getOrSetCache(cacheKey, 15_000, async () => {
@@ -236,10 +333,16 @@ export async function GET(request: Request) {
         },
       };
 
-      const issuesPromise = includeIssues
+      const issueFeedLimit = Math.max(
+        includeIssues ? issuesLimit : 0,
+        includeRecentIssues ? recentIssuesLimit : 0,
+        includeNotifications ? notificationsLimit : 0
+      );
+
+      const issueFeedPromise = issueFeedLimit > 0
         ? Issue.find(issueScopeFilter)
             .select(
-              "title category status location createdAt updatedAt priority recurring student assignedStaff department academicDepartment serviceDepartment"
+              "title category status location createdAt updatedAt dueDate priority recurring student assignedStaff department academicDepartment serviceDepartment"
             )
             .populate("student", "name email")
             .populate("assignedStaff", "_id name email")
@@ -247,7 +350,7 @@ export async function GET(request: Request) {
             .populate("academicDepartment", "_id name type")
             .populate("serviceDepartment", "_id name type")
             .sort({ updatedAt: -1 })
-            .limit(issuesLimit)
+            .limit(issueFeedLimit)
             .lean()
         : Promise.resolve([]);
 
@@ -369,17 +472,35 @@ export async function GET(request: Request) {
           })()
         : Promise.resolve([]);
 
-      const [issues, reportRows, workers] = await Promise.all([
-        issuesPromise,
+      const [issueFeed, reportRows, workers] = await Promise.all([
+        issueFeedPromise,
         reportsPromise,
         workersPromise,
       ]);
+
+      const issueRows = Array.isArray(issueFeed)
+        ? (issueFeed as DashboardIssueRow[])
+        : [];
+
+      const issues = includeIssues
+        ? issueRows.slice(0, issuesLimit)
+        : [];
+
+      const recentIssues = includeRecentIssues
+        ? issueRows.slice(0, recentIssuesLimit)
+        : [];
+
+      const notifications = includeNotifications
+        ? buildDashboardNotifications(issueRows, notificationsLimit)
+        : [];
 
       const [feedbackRows, statusDistribution, priorityDistribution] = reportRows;
       const feedback = feedbackRows[0] || { averageRating: 0, total: 0 };
 
       return {
         issues,
+        recentIssues,
+        notifications,
         workers,
         reports: {
           feedback: {

@@ -115,6 +115,9 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   deleteFromCacheByPrefix("dept-admin:dashboard:");
   deleteFromCacheByPrefix("dept-admin:workers:");
+  deleteFromCacheByPrefix("dept-admin:notifications:");
+  deleteFromCacheByPrefix("dept-admin:issues:");
+  deleteFromCacheByPrefix("dept-admin:reports:");
 
   return NextResponse.json({ message: "Issue assigned successfully.", issue: updatedIssue });
 }

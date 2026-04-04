@@ -5,7 +5,7 @@ import "@/models/Department";
 import { signToken } from "@/lib/auth";
 import { isOtpFormatValid, normalizeEmail, verifyOtpRecord } from "@/lib/otp-service";
 
-const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
   try {
@@ -19,8 +19,8 @@ export async function POST(request: Request) {
 
     const normalizedEmail = normalizeEmail(email);
 
-    if (!collegeEmailRegex.test(normalizedEmail)) {
-      return NextResponse.json({ message: "Please use your college email." }, { status: 400 });
+    if (!emailRegex.test(normalizedEmail)) {
+      return NextResponse.json({ message: "Please enter a valid email address." }, { status: 400 });
     }
 
     if (!isOtpFormatValid(otp)) {

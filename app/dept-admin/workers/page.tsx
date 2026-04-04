@@ -32,10 +32,19 @@ export default function DeptAdminWorkersPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [departmentId, setDepartmentId] = useState("all");
   const [sort, setSort] = useState<"name" | "load_asc" | "load_desc">("load_asc");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const getWorkloadMeta = (activeIssues: number) => {
     const ratio = Math.min(1, Math.max(0, activeIssues / MAX_CAPACITY));
@@ -74,7 +83,7 @@ export default function DeptAdminWorkersPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch) params.set("search", debouncedSearch);
       if (departmentId !== "all") params.set("departmentId", departmentId);
       params.set("sort", sort);
 
@@ -96,11 +105,11 @@ export default function DeptAdminWorkersPage() {
   useEffect(() => {
     void loadWorkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, departmentId, sort]);
+  }, [debouncedSearch, departmentId, sort]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, departmentId, sort]);
+  }, [debouncedSearch, departmentId, sort]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(workers.length / pageSize)), [workers.length, pageSize]);
 

@@ -21,15 +21,13 @@ type Student = {
   createdAt?: string;
 };
 
-type IssueLite = {
-  _id: string;
-  student?: { _id?: string } | null;
-};
-
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 30000;
+const ENABLE_ADMIN_AUTO_REFRESH = false;
+const STUDENT_LIST_ENDPOINT = "/api/admin/students";
+const STUDENT_METRICS_ENDPOINT = "/api/admin/metrics?scope=students";
 
 export default function AdminStudentsPage() {
-  const auth = loadAuth();
+  const auth = useMemo(() => loadAuth(), []);
   const { showToast } = useToast();
 
   const [students, setStudents] = useState<Student[]>([]);
@@ -71,20 +69,12 @@ export default function AdminStudentsPage() {
     }
 
     Promise.all([
-      authFetch("/api/admin/students", { method: "GET" }, auth.token),
-      authFetch("/api/admin/issues", { method: "GET" }, auth.token),
+      authFetch(STUDENT_LIST_ENDPOINT, { method: "GET" }, auth.token),
+      authFetch(STUDENT_METRICS_ENDPOINT, { method: "GET" }, auth.token),
     ])
-      .then(([studentsRes, issueRes]) => {
+      .then(([studentsRes, metricsRes]) => {
         setStudents(studentsRes.students || []);
-
-        const issues = (issueRes.issues || []) as IssueLite[];
-        const counts: Record<string, number> = {};
-        issues.forEach((issue) => {
-          const studentId = String(issue.student?._id || "");
-          if (!studentId) return;
-          counts[studentId] = (counts[studentId] || 0) + 1;
-        });
-        setRaisedCountMap(counts);
+        setRaisedCountMap((metricsRes?.issueCountByStudent || {}) as Record<string, number>);
       })
       .catch((err) =>
         showToast({
@@ -106,9 +96,9 @@ export default function AdminStudentsPage() {
   }, []);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!ENABLE_ADMIN_AUTO_REFRESH || !auth) return;
     const intervalId = window.setInterval(() => {
-      if (!actionTarget && !actionSubmitting) {
+      if (!actionTarget && !actionSubmitting && !document.hidden) {
         loadStudents(true);
       }
     }, POLL_INTERVAL_MS);

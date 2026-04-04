@@ -96,7 +96,7 @@ export default function DepartmentAdminsPage() {
   const loadDepartments = async () => {
     if (!auth) return;
     try {
-      const res = await authFetch("/api/admin/departments", { method: "GET" }, auth.token);
+      const res = await authFetch("/api/admin/departments?view=list", { method: "GET" }, auth.token);
       setDepartments(Array.isArray(res?.departments) ? res.departments : []);
     } catch {
       // Keep department list empty if loading fails; main fetch state handles primary error surface.
@@ -383,7 +383,6 @@ export default function DepartmentAdminsPage() {
         variant: "success",
       });
       await loadAdmins(true);
-      await loadAdmins();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to update status";
       showToast({ title: "Update Failed", message, variant: "error" });

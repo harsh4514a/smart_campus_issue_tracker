@@ -8,7 +8,7 @@ import { authFetch, getRedirectPath, saveAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
 import { Eye, EyeOff } from "lucide-react";
 
-const collegeEmailRegex = /@charusat\.(edu|ac)\.in$/i;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$/;
 
 interface ResetFormState {
@@ -71,8 +71,8 @@ export default function ForgotPasswordPage() {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (!collegeEmailRegex.test(normalizedEmail)) {
-      showToast({ message: "Use your official CHARUSAT email", variant: "error" });
+    if (!emailRegex.test(normalizedEmail)) {
+      showToast({ message: "Please enter a valid email address", variant: "error" });
       return;
     }
 
@@ -145,7 +145,7 @@ export default function ForgotPasswordPage() {
           <div className="bg-emerald-900/30 backdrop-blur-xl rounded-2xl border border-emerald-700/40 shadow-2xl overflow-hidden">
             <div className="bg-linear-to-r from-emerald-700 to-teal-700 px-10 py-12 text-center text-white">
               <h1 className="text-3xl font-bold mb-3">Reset your password</h1>
-              <p className="text-emerald-100/90">We will send a 6-digit code to your college email</p>
+              <p className="text-emerald-100/90">We will send a 6-digit code to your email</p>
             </div>
 
             <div className="p-10">
@@ -153,14 +153,14 @@ export default function ForgotPasswordPage() {
                 {!otpSent ? (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-emerald-200 mb-2">College Email</label>
+                      <label className="block text-sm font-medium text-emerald-200 mb-2">Email</label>
                       <input
                         name="email"
                         type="email"
                         value={form.email}
                         onChange={handleChange}
                         className="w-full px-5 py-3.5 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-white placeholder-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30 outline-none transition"
-                        placeholder="yourid@charusat.edu.in"
+                        placeholder="you@example.com"
                         autoComplete="email"
                         required
                       />

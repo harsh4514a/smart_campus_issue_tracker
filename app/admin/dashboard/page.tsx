@@ -72,7 +72,15 @@ type FeedbackSummary = {
 
 type DashboardDataResponse = {
   stats: Stats;
-  issues: AdminIssue[];
+  issues?: AdminIssue[];
+  recentIssues?: AdminIssue[];
+  notifications?: Array<{
+    id: string;
+    issueId: string;
+    message: string;
+    tone: "green" | "indigo" | "teal";
+    timestamp: string | null;
+  }>;
   reports?: {
     feedback?: FeedbackSummary;
   };
@@ -83,10 +91,13 @@ type ActivityItem = {
   iconTone: "green" | "indigo" | "teal";
   message: string;
   timestamp: string;
+  happenedAt: number | null;
 };
 
 const POLL_INTERVAL_MS = 20000;
-const DASHBOARD_ISSUES_LIMIT = 80;
+const ENABLE_ADMIN_AUTO_REFRESH = false;
+const DASHBOARD_RECENT_ISSUES_LIMIT = 10;
+const DASHBOARD_NOTIFICATIONS_LIMIT = 10;
 const MAX_ACTIVITY_ITEMS = 5;
 
 export default function AdminDashboard() {
@@ -94,9 +105,17 @@ export default function AdminDashboard() {
   const isSuperAdmin = auth?.user?.adminRole === "super_admin";
   const cacheKey = "scit_admin_dashboard_data";
   const cacheTtlMs = 2 * 60 * 1000;
-  const cachedDashboard = readCachedDashboard(cacheKey, cacheTtlMs);
+  const cachedDashboard = useMemo(
+    () => readCachedDashboard(cacheKey, cacheTtlMs),
+    [cacheKey, cacheTtlMs]
+  );
   const [stats, setStats] = useState<Stats | null>(() => cachedDashboard?.stats || null);
-  const [issues, setIssues] = useState<AdminIssue[]>(() => cachedDashboard?.issues || []);
+  const [recentIssues, setRecentIssues] = useState<AdminIssue[]>(
+    () => cachedDashboard?.recentIssues || []
+  );
+  const [notifications, setNotifications] = useState<DashboardDataResponse["notifications"]>(
+    () => cachedDashboard?.notifications || []
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(() => !cachedDashboard);
   const [refreshing, setRefreshing] = useState(false);
@@ -120,7 +139,7 @@ export default function AdminDashboard() {
 
     try {
       const data = await authFetch(
-        `/api/dashboard?issuesLimit=${DASHBOARD_ISSUES_LIMIT}&includeWorkers=0`,
+        `/api/dashboard?includeIssues=0&includeWorkers=0&recentIssuesLimit=${DASHBOARD_RECENT_ISSUES_LIMIT}&notificationsLimit=${DASHBOARD_NOTIFICATIONS_LIMIT}`,
         { method: "GET", signal },
         activeAuth.token
       );
@@ -129,8 +148,13 @@ export default function AdminDashboard() {
 
       const payload = data as DashboardDataResponse;
       const statsData = payload?.stats || null;
-      const issuesData = Array.isArray(payload?.issues)
-        ? payload.issues.slice(0, DASHBOARD_ISSUES_LIMIT)
+      const latestRecentIssues = Array.isArray(payload?.recentIssues)
+        ? payload.recentIssues.slice(0, DASHBOARD_RECENT_ISSUES_LIMIT)
+        : Array.isArray(payload?.issues)
+          ? payload.issues.slice(0, DASHBOARD_RECENT_ISSUES_LIMIT)
+          : [];
+      const latestNotifications = Array.isArray(payload?.notifications)
+        ? payload.notifications.slice(0, DASHBOARD_NOTIFICATIONS_LIMIT)
         : [];
       const feedback = payload?.reports?.feedback;
 
@@ -138,7 +162,8 @@ export default function AdminDashboard() {
         setStats(statsData);
       }
 
-      setIssues(issuesData);
+      setRecentIssues(latestRecentIssues);
+      setNotifications(latestNotifications);
       setFeedbackSummary({
         averageRating: Number(feedback?.averageRating || 0),
         total: Number(feedback?.total || 0),
@@ -147,7 +172,8 @@ export default function AdminDashboard() {
       if (statsData) {
         writeCachedDashboard(cacheKey, {
           stats: statsData,
-          issues: issuesData,
+          recentIssues: latestRecentIssues,
+          notifications: latestNotifications,
           feedbackSummary: {
             averageRating: Number(feedback?.averageRating || 0),
             total: Number(feedback?.total || 0),
@@ -175,7 +201,7 @@ export default function AdminDashboard() {
   }, [loadDashboardData]);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!ENABLE_ADMIN_AUTO_REFRESH || !auth) return;
 
     let intervalId: number | null = null;
 
@@ -185,7 +211,7 @@ export default function AdminDashboard() {
       return controller;
     };
 
-    let activeController: AbortController | null = runSilentRefresh();
+    let activeController: AbortController | null = null;
 
     const startPolling = () => {
       if (document.hidden || intervalId !== null) return;
@@ -249,17 +275,14 @@ export default function AdminDashboard() {
   }, [lastUpdatedAt]);
 
   const trendData = useMemo(() => {
-    const activeAssignmentMatcher = (issue: AdminIssue) =>
-      Boolean(issue.assignedStaff?._id) && (issue.status === "Pending" || issue.status === "In Progress");
-
     return {
-      total: getMonthlyTrend(issues, () => true),
-      pending: getMonthlyTrend(issues, (issue) => issue.status === "Pending"),
-      assigned: getMonthlyTrend(issues, activeAssignmentMatcher),
-      inProgress: getMonthlyTrend(issues, (issue) => issue.status === "In Progress"),
-      resolved: getMonthlyTrend(issues, (issue) => issue.status === "Resolved"),
+      total: { direction: "flat" as const, delta: 0, label: "", className: "text-slate-500" },
+      pending: toTrendMeta(stats?.trends?.pending?.current, stats?.trends?.pending?.previous),
+      assigned: { direction: "flat" as const, delta: 0, label: "", className: "text-slate-500" },
+      inProgress: { direction: "flat" as const, delta: 0, label: "", className: "text-slate-500" },
+      resolved: toTrendMeta(stats?.trends?.resolved?.current, stats?.trends?.resolved?.previous),
     };
-  }, [issues]);
+  }, [stats]);
 
   const metricCards = useMemo(
     () => [
@@ -292,7 +315,7 @@ export default function AdminDashboard() {
 
   const hasAttentionItems = needsAttention.unassigned > 0 || needsAttention.overdue > 0 || needsAttention.recurring > 0;
 
-  const totalIssueCount = stats?.issues ?? issues.length;
+  const totalIssueCount = stats?.issues ?? recentIssues.length;
   const resolutionRate = totalIssueCount > 0 ? Math.round(((stats?.resolved ?? 0) / totalIssueCount) * 100) : 0;
   const assignedCoverage =
     totalIssueCount > 0
@@ -313,20 +336,12 @@ export default function AdminDashboard() {
     [stats]
   );
 
-  const issueTimestampById = useMemo(() => {
-    const map = new Map<string, number | null>();
-    issues.forEach((issue) => {
-      map.set(issue._id, toTimestamp(issue.updatedAt || issue.createdAt));
-    });
-    return map;
-  }, [issues]);
-
   const topResolver = useMemo(() => {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
     const map = new Map<string, number>();
 
-    issues.forEach((issue) => {
+    recentIssues.forEach((issue) => {
       if (issue.status !== "Resolved") return;
       const resolvedAt = toTimestamp(issue.updatedAt || issue.createdAt);
       if (resolvedAt === null || resolvedAt < monthStart) return;
@@ -337,10 +352,25 @@ export default function AdminDashboard() {
     const [name, count] = Array.from(map.entries()).sort((a, b) => b[1] - a[1])[0] || [];
     if (!name || !count) return null;
     return { name, count };
-  }, [issues]);
+  }, [recentIssues]);
 
   const recentActivity = useMemo<ActivityItem[]>(() => {
-    return issues
+    const feed = notifications || [];
+
+    if (feed.length > 0) {
+      return feed.slice(0, MAX_ACTIVITY_ITEMS).map((item) => {
+        const eventTime = toTimestamp(item.timestamp);
+        return {
+          id: item.issueId,
+          iconTone: item.tone,
+          message: item.message,
+          timestamp: formatRelativeTime(eventTime),
+          happenedAt: eventTime,
+        };
+      });
+    }
+
+    return recentIssues
       .slice()
       .sort((a, b) => (toTimestamp(b.updatedAt || b.createdAt) || 0) - (toTimestamp(a.updatedAt || a.createdAt) || 0))
       .slice(0, MAX_ACTIVITY_ITEMS)
@@ -354,6 +384,7 @@ export default function AdminDashboard() {
             iconTone: "green",
             message: `${issueTitle} - resolved by ${issue.assignedStaff?.name || "staff"}`,
             timestamp: formatRelativeTime(eventTime),
+            happenedAt: eventTime,
           };
         }
 
@@ -363,6 +394,7 @@ export default function AdminDashboard() {
             iconTone: "indigo",
             message: `${issueTitle} - assigned by admin to ${issue.assignedStaff.name}`,
             timestamp: formatRelativeTime(eventTime),
+            happenedAt: eventTime,
           };
         }
 
@@ -371,9 +403,10 @@ export default function AdminDashboard() {
           iconTone: "teal",
           message: `${issueTitle} - reported by ${issue.student?.name || "student"}`,
           timestamp: formatRelativeTime(eventTime),
+          happenedAt: eventTime,
         };
       });
-  }, [issues]);
+  }, [notifications, recentIssues]);
 
   const groupedActivity = useMemo(() => {
     const today: ActivityItem[] = [];
@@ -384,7 +417,7 @@ export default function AdminDashboard() {
     const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
 
     for (const item of recentActivity) {
-      const ts = issueTimestampById.get(item.id) ?? null;
+      const ts = item.happenedAt;
       if (!ts) {
         older.push(item);
       } else if (ts >= todayStart) {
@@ -397,7 +430,7 @@ export default function AdminDashboard() {
     }
 
     return { today, yesterday, older };
-  }, [issueTimestampById, recentActivity]);
+  }, [recentActivity]);
 
   const exportMonthlyReport = (format: "csv" | "pdf") => {
     if (!stats) return;
@@ -581,7 +614,7 @@ export default function AdminDashboard() {
                   <ActivityGroup title="Earlier" items={groupedActivity.older} />
                 ) : null}
 
-                {issues.length > 5 ? (
+                {recentIssues.length > 5 ? (
                   <div className="pt-1 text-right">
                     <Link href="/admin/issues" className="text-xs font-semibold text-teal-700 hover:underline">View All</Link>
                   </div>
@@ -781,25 +814,12 @@ const QuickAction = memo(function QuickAction({
   );
 });
 
-function getMonthlyTrend(issues: AdminIssue[], predicate: (issue: AdminIssue) => boolean): TrendMeta {
-  const now = Date.now();
-  const nowDate = new Date(now);
-  const thisMonthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1).getTime();
-  const previousMonthStart = new Date(nowDate.getFullYear(), nowDate.getMonth() - 1, 1).getTime();
+function toTrendMeta(current?: number, previous?: number): TrendMeta {
+  const safeCurrent = Number(current || 0);
+  const safePrevious = Number(previous || 0);
+  const delta = safeCurrent - safePrevious;
 
-  const thisMonth = issues.filter((issue) => {
-    const created = toTimestamp(issue.createdAt);
-    return created !== null && created >= thisMonthStart && created <= now && predicate(issue);
-  }).length;
-
-  const previousMonth = issues.filter((issue) => {
-    const created = toTimestamp(issue.createdAt);
-    return created !== null && created >= previousMonthStart && created < thisMonthStart && predicate(issue);
-  }).length;
-
-  const delta = thisMonth - previousMonth;
-
-  if (thisMonth === 0 && previousMonth === 0) {
+  if (safeCurrent === 0 && safePrevious === 0) {
     return { direction: "flat", delta: 0, label: "", className: "text-slate-500" };
   }
 
@@ -850,7 +870,7 @@ const ActivityGroup = memo(function ActivityGroup({
   );
 });
 
-function toTimestamp(value?: string) {
+function toTimestamp(value?: string | null) {
   if (!value) return null;
   const date = new Date(value).getTime();
   if (Number.isNaN(date)) return null;
@@ -890,14 +910,16 @@ function readCachedDashboard(key: string, ttlMs: number) {
     const parsed = JSON.parse(raw) as {
       timestamp: number;
       stats: Stats;
-      issues: AdminIssue[];
+      recentIssues: AdminIssue[];
+      notifications: DashboardDataResponse["notifications"];
       feedbackSummary: FeedbackSummary;
     };
     if (!parsed.timestamp || !parsed.stats) return null;
     if (Date.now() - parsed.timestamp > ttlMs) return null;
     return {
       stats: parsed.stats,
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+      recentIssues: Array.isArray(parsed.recentIssues) ? parsed.recentIssues : [],
+      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
       feedbackSummary: parsed.feedbackSummary || { averageRating: 0, total: 0 },
     };
   } catch {
@@ -907,7 +929,12 @@ function readCachedDashboard(key: string, ttlMs: number) {
 
 function writeCachedDashboard(
   key: string,
-  payload: { stats: Stats; issues: AdminIssue[]; feedbackSummary: FeedbackSummary }
+  payload: {
+    stats: Stats;
+    recentIssues: AdminIssue[];
+    notifications: DashboardDataResponse["notifications"];
+    feedbackSummary: FeedbackSummary;
+  }
 ) {
   if (typeof window === "undefined") return;
   try {
@@ -916,7 +943,8 @@ function writeCachedDashboard(
       JSON.stringify({
         timestamp: Date.now(),
         stats: payload.stats,
-        issues: payload.issues,
+        recentIssues: payload.recentIssues,
+        notifications: payload.notifications,
         feedbackSummary: payload.feedbackSummary,
       })
     );

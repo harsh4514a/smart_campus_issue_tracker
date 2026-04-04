@@ -1,21 +1,25 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileDown, TrendingDown, TrendingUp } from "lucide-react";
 import DeptAdminShell from "@/components/dept-admin/DeptAdminShell";
 import { authFetch, loadAuth } from "@/lib/client-auth";
 import { useToast } from "@/components/ToastProvider";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+
+const DeptAdminReportsCharts = dynamic(
+  () => import("@/components/dept-admin/DeptAdminReportsCharts"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="skeleton-shimmer h-80 rounded-xl border border-slate-200 bg-white" />
+        <div className="skeleton-shimmer h-80 rounded-xl border border-slate-200 bg-white" />
+      </div>
+    ),
+  }
+);
 
 type Department = { _id: string; name: string; type?: string };
 
@@ -68,6 +72,7 @@ export default function DeptAdminReportsPage() {
   const [departmentId, setDepartmentId] = useState("all");
   const [category, setCategory] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<ReportsData | null>(null);
 
   const hasInvalidDateRange = Boolean(from && to && new Date(from).getTime() > new Date(to).getTime());
@@ -76,11 +81,14 @@ export default function DeptAdminReportsPage() {
     return `${new Date(from).toLocaleDateString()} - ${new Date(to).toLocaleDateString()}`;
   }, [from, to]);
 
-  const load = async () => {
+  const load = async (signal?: AbortSignal) => {
     if (!auth) return;
 
     if (hasInvalidDateRange) {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        setRefreshing(false);
+      }
       showToast({
         title: "Invalid Date Range",
         message: "From date cannot be after To date.",
@@ -89,19 +97,34 @@ export default function DeptAdminReportsPage() {
       return;
     }
 
-    setLoading(true);
+    if (!data) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+
     try {
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       if (departmentId !== "all") params.set("departmentId", departmentId);
       if (category !== "all") params.set("category", category);
-      const res = await authFetch(`/api/dept-admin/reports?${params.toString()}`, { method: "GET" }, auth.token);
+      const res = await authFetch(
+        `/api/dept-admin/reports?${params.toString()}`,
+        { method: "GET", signal },
+        auth.token
+      );
+
+      if (signal?.aborted) return;
       setData(res as ReportsData);
     } catch (err) {
+      if (signal?.aborted) return;
       showToast({ title: "Load Failed", message: err instanceof Error ? err.message : "Failed", variant: "error" });
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
@@ -160,7 +183,9 @@ export default function DeptAdminReportsPage() {
   };
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, departmentId, category, hasInvalidDateRange]);
 
@@ -240,7 +265,10 @@ export default function DeptAdminReportsPage() {
           </select>
         </section>
 
-        <p className="text-xs font-semibold text-slate-500">Showing data for: {selectedDateLabel}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-500">Showing data for: {selectedDateLabel}</p>
+          {refreshing ? <p className="text-xs font-medium text-slate-500">Refreshing...</p> : null}
+        </div>
 
         {!loading && data ? (
           <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
@@ -259,7 +287,7 @@ export default function DeptAdminReportsPage() {
           </section>
         ) : null}
 
-        {loading ? (
+        {loading && !data ? (
           <ReportsSkeleton />
         ) : !data ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">No report data found.</div>
@@ -287,8 +315,10 @@ export default function DeptAdminReportsPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <IssueTrendChart data={data.trend} />
-              <PriorityDistributionCard rows={data.priorityDistribution} />
+              <DeptAdminReportsCharts
+                trend={data.trend}
+                priorityDistribution={data.priorityDistribution}
+              />
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4">
@@ -370,106 +400,6 @@ function ComparisonCard({ title, current, previous, delta }: { title: string; cu
       </p>
     </div>
   );
-}
-
-function IssueTrendChart({ data }: { data: Array<{ date: string; created: number; resolved: number }> }) {
-  const hasRenderableData = data.some((row) => row.created > 0 || row.resolved > 0);
-  const chartData = data.map((row) => ({
-    ...row,
-    dateTs: new Date(row.date).getTime(),
-  }));
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-700">Issue Trend</h3>
-      <div className="mt-3 h-75">
-        {!hasRenderableData ? (
-          <div className="h-full rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-4">
-            <p className="text-sm font-medium text-slate-600">No data available for the selected period.</p>
-            <div className="mt-4 flex items-end gap-2">
-              {Array.from({ length: 7 }).map((_, idx) => (
-                <div key={idx} className="h-14 w-6 rounded-t bg-slate-200/70" />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData} margin={{ top: 8, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="dateTs"
-                type="number"
-                domain={["dataMin", "dataMax"]}
-                padding={{ left: 20, right: 20 }}
-                tick={{ fontSize: 12 }}
-                tickFormatter={(value) => {
-                  const date = new Date(Number(value));
-                  if (Number.isNaN(date.getTime())) return "";
-                  return `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1).toString().padStart(2, "0")}`;
-                }}
-              />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="created" name="Created" stroke="#0ea5e9" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="resolved" name="Resolved" stroke="#16a34a" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PriorityDistributionCard({ rows }: { rows: Array<{ priority: string; count: number; percentage: number }> }) {
-  const max = Math.max(1, ...rows.map((row) => row.count));
-  const hasRenderableData = rows.some((row) => row.count > 0);
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-700">Priority Distribution</h3>
-      <div className="mt-4 space-y-2">
-        {!hasRenderableData ? (
-          <div className="space-y-2">
-            <p className="text-sm text-slate-500">No data available for selected filters.</p>
-            {rows.map((row) => (
-              <div key={row.priority}>
-                <div className="mb-1 flex justify-between text-xs text-slate-600">
-                  <span>{row.priority}</span>
-                  <span>0 (0%)</span>
-                </div>
-                <div className="h-2 rounded bg-slate-100" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          rows.map((row) => (
-            <button key={row.priority} type="button" title={`${row.priority}: ${row.count}`} className="w-full rounded p-0.5 text-left hover:bg-slate-50">
-              <div className="mb-1 flex justify-between text-xs text-slate-600">
-                <span>{row.priority}</span>
-                <span>{row.count} ({row.percentage}%)</span>
-              </div>
-              <div className="h-2 rounded bg-slate-100">
-                <div
-                  className={`h-2 rounded ${priorityTone(row.priority)}`}
-                  style={{ width: `${Math.max(5, (row.count / max) * 100)}%` }}
-                />
-              </div>
-            </button>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function priorityTone(priority: string) {
-  const normalized = priority.toLowerCase();
-  if (normalized === "urgent") return "bg-rose-500";
-  if (normalized === "high") return "bg-orange-500";
-  if (normalized === "medium") return "bg-amber-500";
-  if (normalized === "low") return "bg-emerald-500";
-  return "bg-slate-400";
 }
 
 function resolutionRateTone(rate: number | null) {

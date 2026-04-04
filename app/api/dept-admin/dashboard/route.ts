@@ -13,15 +13,44 @@ export async function GET(request: Request) {
     const auth = await requireDeptAdmin(request);
     if (auth instanceof Response) return auth;
 
+    const params = new URL(request.url).searchParams;
     const { departmentIds } = auth;
-    const selectedDepartmentId = new URL(request.url).searchParams.get("departmentId");
+    const selectedDepartmentId = params.get("departmentId");
+    const view = (params.get("view") || "full").trim().toLowerCase();
     const scopeFilter = buildDepartmentScopeFilter(departmentIds, selectedDepartmentId);
-    const cacheKey = `dept-admin:dashboard:${auth.user._id}:${[...departmentIds].sort().join(",")}:${selectedDepartmentId || "all"}`;
+    const cacheKey = `dept-admin:dashboard:${view}:${auth.user._id}:${[...departmentIds].sort().join(",")}:${selectedDepartmentId || "all"}`;
 
     const payload = await getOrSetCache(cacheKey, 20_000, async () => {
+      if (view === "summary") {
+        const now = new Date();
+
+        const [total, pending, inProgress, resolved, unassigned, overdue, highPriorityPending] = await Promise.all([
+          Issue.countDocuments(scopeFilter),
+          Issue.countDocuments({ ...scopeFilter, status: "Pending" }),
+          Issue.countDocuments({ ...scopeFilter, status: "In Progress" }),
+          Issue.countDocuments({ ...scopeFilter, status: "Resolved" }),
+          Issue.countDocuments({ ...scopeFilter, assignedStaff: null }),
+          Issue.countDocuments({
+            ...scopeFilter,
+            status: { $nin: ["Resolved", "Rejected"] },
+            dueDate: { $lt: now },
+          }),
+          Issue.countDocuments({ ...scopeFilter, status: "Pending", priority: { $in: ["High", "Urgent"] } }),
+        ]);
+
+        return {
+          kpi: { total, pending, inProgress, resolved },
+          alerts: { unassigned, overdue, highPriorityPending },
+        };
+      }
+
       const now = new Date();
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const trendWindowDays = 60;
+      const trendStart = new Date(now);
+      trendStart.setHours(0, 0, 0, 0);
+      trendStart.setDate(trendStart.getDate() - (trendWindowDays - 1));
       const startOfToday = new Date(now);
       startOfToday.setHours(0, 0, 0, 0);
 
@@ -37,7 +66,8 @@ export async function GET(request: Request) {
         resolvedToday,
         resolvedPrevious7Days,
         resolvedCurrent7Days,
-        trendRows,
+        createdTrendRows,
+        resolvedTrendRows,
         distributionRows,
         scopedIssueIds,
         workers,
@@ -67,11 +97,23 @@ export async function GET(request: Request) {
           updatedAt: { $gte: sevenDaysAgo },
         }),
         Issue.aggregate([
-          { $match: { ...scopeFilter, createdAt: { $gte: sevenDaysAgo } } },
+          { $match: { ...scopeFilter, createdAt: { $gte: trendStart } } },
           {
             $group: {
               _id: {
                 $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+              },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]),
+        Issue.aggregate([
+          { $match: { ...scopeFilter, status: "Resolved", updatedAt: { $gte: trendStart } } },
+          {
+            $group: {
+              _id: {
+                $dateToString: { format: "%Y-%m-%d", date: "$updatedAt" },
               },
               count: { $sum: 1 },
             },
@@ -155,6 +197,19 @@ export async function GET(request: Request) {
             ? `Resolution throughput improved by ${insightDelta} over the last 7 days.`
             : "Resolution throughput is stable compared with the previous 7 days.";
 
+      const createdMap = new Map(
+        createdTrendRows.map((row) => [String(row._id), Number((row as { count?: number }).count || 0)])
+      );
+      const resolvedMap = new Map(
+        resolvedTrendRows.map((row) => [String(row._id), Number((row as { count?: number }).count || 0)])
+      );
+      const trendDates = Array.from(new Set([...createdMap.keys(), ...resolvedMap.keys()])).sort();
+      const trend = trendDates.map((date) => ({
+        date,
+        created: createdMap.get(date) || 0,
+        resolved: resolvedMap.get(date) || 0,
+      }));
+
       return {
         kpi: { total, pending, inProgress, resolved },
         alerts: { unassigned, overdue, highPriorityPending },
@@ -174,7 +229,7 @@ export async function GET(request: Request) {
         }),
         criticalIssues,
         workerSummary,
-        trend: trendRows,
+        trend,
         distribution: distributionRows,
         departments,
       };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useEffect, useRef, useState } from "react";
+import { Suspense, useMemo, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import AdminProtected from "@/components/AdminProtected";
@@ -62,8 +62,20 @@ type StatusFilter = "All" | "Pending" | "In Progress" | "Resolved" | "Assigned" 
 type IssueTab = "active" | "rejected";
 type PriorityFilter = "All" | "Low" | "Medium" | "High" | "Urgent";
 const POLL_INTERVAL_MS = 20000;
+const ENABLE_ADMIN_AUTO_REFRESH = false;
+const ISSUE_LIST_ENDPOINT = "/api/admin/issues?view=triage";
+const ISSUE_STAFF_ENDPOINT = "/api/admin/staff?view=issues";
+const ISSUE_DEPARTMENTS_ENDPOINT = "/api/admin/departments?view=issues";
 
 export default function AdminIssuesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <AdminIssuesPageContent />
+    </Suspense>
+  );
+}
+
+function AdminIssuesPageContent() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -79,6 +91,7 @@ export default function AdminIssuesPage() {
   const [studentFilterId, setStudentFilterId] = useState("");
   const [issueTab, setIssueTab] = useState<IssueTab>("active");
   const [viewIssue, setViewIssue] = useState<Issue | null>(null);
+  const [viewIssueDetailsLoading, setViewIssueDetailsLoading] = useState(false);
   const [viewIssueAuditLogs, setViewIssueAuditLogs] = useState<AuditEntry[]>([]);
   const [viewIssueAuditLoading, setViewIssueAuditLoading] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -106,38 +119,54 @@ export default function AdminIssuesPage() {
 
   const auth = useMemo(() => loadAuth(), []);
   const searchParams = useSearchParams();
+  const viewIssueId = viewIssue?._id;
   const { showToast } = useToast();
 
   useEffect(() => {
     document.title = "Issue Triage | CampusTracker Admin";
   }, []);
 
-  const load = () => {
+  const refreshIssues = async () => {
     if (!auth) return;
+    const issuesRes = await authFetch(ISSUE_LIST_ENDPOINT, { method: "GET" }, auth.token);
+    setIssues(issuesRes.issues || []);
+  };
+
+  const loadInitialData = () => {
+    if (!auth) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
     Promise.all([
-      authFetch("/api/admin/issues", { method: "GET" }, auth.token),
-      authFetch("/api/admin/departments", { method: "GET" }, auth.token),
-      authFetch("/api/admin/staff", { method: "GET" }, auth.token),
+      authFetch(ISSUE_LIST_ENDPOINT, { method: "GET" }, auth.token),
+      authFetch(ISSUE_DEPARTMENTS_ENDPOINT, { method: "GET" }, auth.token),
+      authFetch(ISSUE_STAFF_ENDPOINT, { method: "GET" }, auth.token),
     ])
       .then(([issuesRes, deptRes, staffRes]) => {
         setIssues(issuesRes.issues || []);
         setDepartments(deptRes.departments || []);
         setStaffMembers(staffRes.faculty || []);
       })
-    .catch((err) => setError(err instanceof Error ? err.message : "Failed to load issues"))
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load issues"))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    load();
+    loadInitialData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!ENABLE_ADMIN_AUTO_REFRESH || !auth) return;
     const intervalId = window.setInterval(() => {
       if (!savingId && !document.hidden) {
-        load();
+        refreshIssues().catch(() => {
+          // Ignore polling errors to avoid noisy UI interruptions.
+        });
       }
     }, POLL_INTERVAL_MS);
 
@@ -211,6 +240,43 @@ export default function AdminIssuesPage() {
   }, [issues, searchParams]);
 
   useEffect(() => {
+    if (!viewIssueId) {
+      setViewIssueDetailsLoading(false);
+      return;
+    }
+
+    if (!auth) return;
+
+    const issueId = viewIssueId;
+    let cancelled = false;
+
+    setViewIssueDetailsLoading(true);
+    authFetch(`/api/admin/issues/${issueId}`, { method: "GET" }, auth.token)
+      .then((detailRes) => {
+        if (cancelled) return;
+        const detailedIssue = (detailRes.issue || {}) as Issue;
+        setViewIssue((prev) => (prev && prev._id === issueId ? { ...prev, ...detailedIssue } : prev));
+        setIssues((prev) =>
+          prev.map((issue) => (issue._id === issueId ? { ...issue, ...detailedIssue } : issue))
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to load issue details";
+        showToast({ title: "Issue details unavailable", message, variant: "info" });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setViewIssueDetailsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, showToast, viewIssueId]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "/") {
         const activeTag = (document.activeElement as HTMLElement | null)?.tagName?.toLowerCase();
@@ -273,7 +339,7 @@ export default function AdminIssuesPage() {
         },
         auth.token
       );
-      load();
+      await refreshIssues();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to assign";
       setError(message);
@@ -429,7 +495,7 @@ export default function AdminIssuesPage() {
         setViewIssue((prev) => (prev ? { ...prev, status: "Rejected" } : prev));
       }
 
-      load();
+      await refreshIssues();
       showToast({ title: "Success", message: "Issue rejected", variant: "success" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to reject issue";
@@ -461,7 +527,7 @@ export default function AdminIssuesPage() {
         setTriageIssue(null);
       }
 
-      load();
+      await refreshIssues();
       showToast({ title: "Deleted", message: "Issue deleted permanently", variant: "success" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to delete issue";
@@ -493,7 +559,7 @@ export default function AdminIssuesPage() {
         setViewIssue((prev) => (prev ? { ...prev, status: "Pending" } : prev));
       }
 
-      load();
+      await refreshIssues();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to restore issue";
       setError(message);
@@ -673,7 +739,7 @@ export default function AdminIssuesPage() {
         )
       );
       setSelectedIssueIds([]);
-      load();
+      await refreshIssues();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to apply bulk status";
       setError(message);
@@ -737,7 +803,7 @@ export default function AdminIssuesPage() {
       }
 
       setSelectedIssueIds([]);
-      load();
+      await refreshIssues();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to bulk assign";
       setError(message);
@@ -765,7 +831,7 @@ export default function AdminIssuesPage() {
       );
       setSelectedIssueIds([]);
       showToast({ title: "Success", message: "Selected issues rejected", variant: "success" });
-      load();
+      await refreshIssues();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to bulk reject";
       setError(message);
@@ -784,7 +850,7 @@ export default function AdminIssuesPage() {
       );
       setSelectedIssueIds([]);
       showToast({ title: "Deleted", message: "Selected issues deleted", variant: "success" });
-      load();
+      await refreshIssues();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to bulk delete";
       setError(message);
@@ -1594,6 +1660,12 @@ export default function AdminIssuesPage() {
                 </div>
 
                 <div className="space-y-4 px-5 py-4">
+                  {viewIssueDetailsLoading ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      Loading full issue details...
+                    </div>
+                  ) : null}
+
                   {isOverdue(viewIssue.dueDate, viewIssue.status) ? (
                     <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
                       This issue is overdue by {formatOverdueForIssue(viewIssue.dueDate)}.
@@ -1622,7 +1694,7 @@ export default function AdminIssuesPage() {
                     </p>
                   </div>
 
-                  {viewIssue.imageUrl ? (
+                  {getIssueImageUrls(viewIssue).length > 0 ? (
                     <div>
                       <p className="text-sm font-semibold text-slate-700">Reported Photo</p>
                       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">

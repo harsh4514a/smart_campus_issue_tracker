@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AdminProtected from "@/components/AdminProtected";
 import AdminShell from "@/components/admin/AdminShell";
@@ -18,22 +19,6 @@ import {
   Sparkles,
   UserCheck,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  LabelList,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 type IssueStatus = "Pending" | "In Progress" | "Resolved" | "Rejected";
 type IssuePriority = "Low" | "Medium" | "High" | "Urgent";
@@ -58,8 +43,16 @@ type DateRangeFilter = "All" | "7d" | "30d" | "90d";
 type TableSort = "date_desc" | "date_asc" | "status" | "department" | "priority";
 
 const POLL_INTERVAL_MS = 20000;
-const REFERENCE_TIMESTAMP = Date.now();
-const REPORTS_ISSUES_LIMIT = 400;
+const ENABLE_ADMIN_AUTO_REFRESH = false;
+const REPORTS_ISSUES_LIMIT = 80;
+
+const LazyAdminReportsCharts = dynamic(
+  () => import("@/components/admin/AdminReportsCharts"),
+  {
+    ssr: false,
+    loading: () => <div className="h-96 animate-pulse rounded-xl border border-slate-200 bg-white" />,
+  }
+);
 
 type FeedbackSummary = {
   averageRating: number;
@@ -149,7 +142,7 @@ export default function AdminReportsPage() {
 
     try {
       const data = await authFetch(
-        `/api/dashboard?issuesLimit=${REPORTS_ISSUES_LIMIT}&includeWorkers=0`,
+        `/api/dashboard?issuesLimit=${REPORTS_ISSUES_LIMIT}&includeWorkers=0&includeRecentIssues=0&includeNotifications=0`,
         { method: "GET", signal },
         auth.token
       );
@@ -185,6 +178,8 @@ export default function AdminReportsPage() {
   }, [load]);
 
   useEffect(() => {
+    if (!ENABLE_ADMIN_AUTO_REFRESH) return;
+
     const auth = loadAuth();
     if (!auth) return;
 
@@ -220,7 +215,6 @@ export default function AdminReportsPage() {
       startPolling();
     };
 
-    runSilentRefresh();
     startPolling();
     document.addEventListener("visibilitychange", onVisibilityChange);
 
@@ -380,7 +374,7 @@ export default function AdminReportsPage() {
   }, [issues]);
 
   const filteredTableIssues = useMemo(() => {
-    const now = REFERENCE_TIMESTAMP;
+    const now = Date.now();
     const dateRangeMs =
       dateRangeFilter === "7d"
         ? 7 * 24 * 60 * 60 * 1000
@@ -597,198 +591,26 @@ export default function AdminReportsPage() {
                 )}
               </section>
 
-              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-                <ChartCard title="Issues by Status" className="h-full">
-                  <div className="relative h-72 w-full">
-                    {summary.total === 0 ? (
-                      <EmptyChartMessage message="No data available yet" />
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={statusDonutData}
-                            dataKey="renderValue"
-                            nameKey="name"
-                            innerRadius={62}
-                            outerRadius={92}
-                            paddingAngle={3}
-                            onClick={(entry) => {
-                              if (!entry || typeof entry !== "object") return;
-                              const label = String((entry as { name?: string }).name || "");
-                              if (label === "Pending" || label === "In Progress" || label === "Resolved" || label === "Rejected") {
-                                setStatusFilter(label as "Pending" | "In Progress" | "Resolved" | "Rejected");
-                                setCurrentPage(1);
-                              }
-                            }}
-                            label={({ name, payload }) => (payload?.value > 0 ? `${name} ${payload.value}` : "")}
-                            labelLine
-                          >
-                            {statusDonutData.map((entry) => (
-                              <Cell key={entry.name} fill={entry.color} fillOpacity={entry.value === 0 ? 0.3 : 1} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(_, name, item) => [item?.payload?.value ?? 0, name]} />
-                          <Legend verticalAlign="bottom" height={24} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
-                    {summary.total > 0 && (
-                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                        <div className="text-center">
-                          <p className="text-xs font-semibold text-slate-500">Total Issues</p>
-                          <p className="text-3xl font-semibold text-slate-900">{summary.total}</p>
-                          {summary.resolved === 0 && <p className="text-xs font-medium text-slate-500">(No resolved yet)</p>}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-1 text-sm text-slate-600">
-                    {statusDonutData.map((entry) => (
-                      <p key={entry.name}>
-                        <span style={{ color: entry.color }}>●</span> {entry.name} - {entry.value}
-                      </p>
-                    ))}
-                  </div>
-                </ChartCard>
-
-                <ChartCard title="Issues by Department" className="h-full">
-                  <div className={`${departmentChartData.length === 0 ? "h-40" : "h-72"} w-full`}>
-                    {departmentChartData.length === 0 ? (
-                      <EmptyChartMessage message="No department data available yet" />
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={departmentChartData}
-                          layout="vertical"
-                          margin={{ top: 8, right: 36, left: 8, bottom: 0 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                          <XAxis type="number" allowDecimals={false} />
-                          <YAxis type="category" dataKey="department" width={130} />
-                          <Tooltip formatter={(value) => [value, "Issues"]} />
-                          <Bar
-                            dataKey="count"
-                            fill="#0D9488"
-                            radius={[4, 4, 4, 4]}
-                            onClick={(entry) => {
-                              const department = String((entry as { department?: string })?.department || "");
-                              if (department) {
-                                setDepartmentFilter(department);
-                                setCurrentPage(1);
-                              }
-                            }}
-                          >
-                            <LabelList dataKey="count" position="right" fill="#334155" fontSize={12} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                </ChartCard>
-
-                <ChartCard title="Issue Activity Trend" className="h-full">
-                <div className={`${activityTrendData.every((point) => point.created === 0 && point.resolved === 0) ? "h-40" : "h-72"} w-full`}>
-                  {activityTrendData.every((point) => point.created === 0 && point.resolved === 0) ? (
-                    <EmptyChartMessage message="No data available yet" />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={activityTrendData} margin={{ top: 10, right: 16, left: 2, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="dateTs"
-                          type="number"
-                          domain={["dataMin", "dataMax"]}
-                          padding={{ left: 20, right: 20 }}
-                          tickFormatter={(value) => {
-                            const date = new Date(Number(value));
-                            if (Number.isNaN(date.getTime())) return "";
-                            return `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1).toString().padStart(2, "0")}`;
-                          }}
-                        />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="created"
-                          name="Created Issues"
-                          stroke="#0D9488"
-                          strokeWidth={3}
-                          dot={(props) => {
-                            const isLatest = props.index === activityTrendData.length - 1;
-                            return (
-                              <circle
-                                cx={props.cx}
-                                cy={props.cy}
-                                r={isLatest ? 7 : 4}
-                                fill={isLatest ? "#0F766E" : "#0D9488"}
-                                stroke="#ffffff"
-                                strokeWidth={2}
-                              />
-                            );
-                          }}
-                          activeDot={{
-                            r: 6,
-                            onClick: (event) => {
-                              const payload = (event as { payload?: { date?: string } })?.payload;
-                              if (!payload?.date) return;
-                              setStartDate(payload.date);
-                              setEndDate(payload.date);
-                            },
-                          }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="resolved"
-                          name="Resolved Issues"
-                          stroke="#16A34A"
-                          strokeWidth={3}
-                          dot={(props) => {
-                            const isLatest = props.index === activityTrendData.length - 1;
-                            return (
-                              <circle
-                                cx={props.cx}
-                                cy={props.cy}
-                                r={isLatest ? 7 : 4}
-                                fill={isLatest ? "#15803D" : "#16A34A"}
-                                stroke="#ffffff"
-                                strokeWidth={2}
-                              />
-                            );
-                          }}
-                        />
-                        <Legend />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-                {activityTrendData.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-medium text-slate-600">
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-teal-600" />Created Issues</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-600" />Resolved Issues</span>
-                    <span className="text-slate-500">Tip: click a point to filter the report date.</span>
-                  </div>
-                ) : null}
-                {summary.resolved === 0 && <p className="text-xs font-medium text-slate-500">No issues resolved yet</p>}
-              </ChartCard>
-
-                <ChartCard title="Insights" className="h-full">
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-sm text-slate-700">
-                        Most issues are pending (<span className="font-semibold">{dashboardInsights.pendingPercent}%</span>).
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-sm text-slate-700">{dashboardInsights.topDepartmentText}.</p>
-                    </div>
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                      <p className="text-sm font-medium text-emerald-800">
-                        Created vs Resolved trend helps track whether backlog is improving or growing.
-                      </p>
-                    </div>
-                  </div>
-                </ChartCard>
-              </div>
+              <LazyAdminReportsCharts
+                summaryTotal={summary.total}
+                summaryResolved={summary.resolved}
+                statusDonutData={statusDonutData}
+                departmentChartData={departmentChartData}
+                activityTrendData={activityTrendData}
+                dashboardInsights={dashboardInsights}
+                onStatusSelect={(statusValue) => {
+                  setStatusFilter(statusValue);
+                  setCurrentPage(1);
+                }}
+                onDepartmentSelect={(departmentValue) => {
+                  setDepartmentFilter(departmentValue);
+                  setCurrentPage(1);
+                }}
+                onDateSelect={(dateValue) => {
+                  setStartDate(dateValue);
+                  setEndDate(dateValue);
+                }}
+              />
 
               <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-200 px-5 py-4">
@@ -1052,19 +874,6 @@ const SummaryCard = memo(function SummaryCard({
       )}
     </div>
   );
-});
-
-const ChartCard = memo(function ChartCard({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:scale-[1.01] hover:shadow-md ${className}`}>
-      <h2 className="mb-3 text-lg font-semibold text-slate-900">{title}</h2>
-      {children}
-    </section>
-  );
-});
-
-const EmptyChartMessage = memo(function EmptyChartMessage({ message }: { message: string }) {
-  return <div className="flex h-full items-center justify-center text-sm text-slate-500">{message}</div>;
 });
 
 const FilterSelect = memo(function FilterSelect({

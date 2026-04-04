@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { AdminRole, loadAuth } from "@/lib/client-auth";
 
 type AllowedAdminRole = "super_admin" | "dept_admin" | "worker";
+type AccessStatus = "loading" | "allowed" | "unauthorized" | "forbidden";
+
+const ENABLE_AUTH_DEBUG_LOGS = process.env.NODE_ENV !== "production";
+
+function logAdminProtected(event: string, details: Record<string, unknown>) {
+  if (!ENABLE_AUTH_DEBUG_LOGS) return;
+  console.debug("[AdminProtected]", event, details);
+}
 
 export default function AdminProtected({
   children,
@@ -14,46 +22,97 @@ export default function AdminProtected({
   allowedAdminRoles?: AllowedAdminRole[];
 }) {
   const router = useRouter();
-  const [hasAccess, setHasAccess] = useState(false);
-  const [checkingAccess, setCheckingAccess] = useState(true);
+  const pathname = usePathname();
+  const [status, setStatus] = useState<AccessStatus>("loading");
+  const redirectTargetRef = useRef<string | null>(null);
+  const renderCountRef = useRef(0);
+  const checkCountRef = useRef(0);
+
+  const allowedRolesKey = (allowedAdminRoles || []).slice().sort().join("|") || "all";
+  const normalizedAllowedRoles = useMemo(
+    () =>
+      allowedRolesKey === "all"
+        ? null
+        : (allowedRolesKey.split("|") as AllowedAdminRole[]),
+    [allowedRolesKey]
+  );
 
   useEffect(() => {
-    const checkAccess = () => {
-      const isAdminFlag = sessionStorage.getItem("isAdmin") === "true";
-      const auth = loadAuth();
-      const currentRole = (auth?.user.adminRole || null) as AdminRole | null;
-      const roleAllowed =
-        !allowedAdminRoles || (currentRole ? allowedAdminRoles.includes(currentRole as AllowedAdminRole) : false);
-      const stillUnauthorized = !isAdminFlag || !auth || auth.user.role !== "admin";
+    renderCountRef.current += 1;
+    logAdminProtected("render", {
+      count: renderCountRef.current,
+      pathname,
+      status,
+      allowedRolesKey,
+    });
+  }, [allowedRolesKey, pathname, status]);
 
-      if (stillUnauthorized) {
-        setHasAccess(false);
-        setCheckingAccess(false);
-        router.replace("/admin/login");
-      } else if (!roleAllowed) {
-        setHasAccess(false);
-        setCheckingAccess(false);
-        router.replace("/unauthorized");
-      } else {
-        setHasAccess(true);
-        setCheckingAccess(false);
+  useEffect(() => {
+    checkCountRef.current += 1;
+    logAdminProtected("check:start", {
+      count: checkCountRef.current,
+      pathname,
+      allowedRolesKey,
+    });
+
+    const auth = loadAuth();
+    const isAdmin = Boolean(auth && auth.user.role === "admin");
+    const roleFromAuth = (auth?.user?.adminRole || null) as AdminRole | null;
+    const inferredRole = (
+      roleFromAuth || (pathname.startsWith("/dept-admin") ? "dept_admin" : "super_admin")
+    ) as AllowedAdminRole;
+
+    if (!isAdmin) {
+      if (typeof window !== "undefined" && sessionStorage.getItem("isAdmin") === "true") {
+        sessionStorage.removeItem("isAdmin");
       }
-    };
+      setStatus("unauthorized");
+      logAdminProtected("check:unauthorized", { pathname });
+      return;
+    }
 
-    checkAccess();
+    const roleAllowed =
+      !normalizedAllowedRoles || normalizedAllowedRoles.includes(inferredRole);
 
-    const onStorage = () => checkAccess();
-    window.addEventListener("storage", onStorage);
+    if (!roleAllowed) {
+      setStatus("forbidden");
+      logAdminProtected("check:forbidden", {
+        pathname,
+        inferredRole,
+        allowed: normalizedAllowedRoles,
+      });
+      return;
+    }
 
-    return () => {
-      window.removeEventListener("storage", onStorage);
-    };
-  }, [allowedAdminRoles, router]);
+    redirectTargetRef.current = null;
+    setStatus("allowed");
+    logAdminProtected("check:allowed", { pathname, inferredRole });
+  }, [allowedRolesKey, normalizedAllowedRoles, pathname]);
 
-  if (checkingAccess || !hasAccess) {
+  useEffect(() => {
+    if (status === "loading" || status === "allowed") return;
+
+    const target = status === "forbidden" ? "/unauthorized" : "/admin/login";
+
+    if (pathname === target) {
+      logAdminProtected("redirect:skip-current-path", { pathname, target });
+      return;
+    }
+
+    if (redirectTargetRef.current === target) {
+      logAdminProtected("redirect:skip-duplicate", { pathname, target });
+      return;
+    }
+
+    redirectTargetRef.current = target;
+    logAdminProtected("redirect:replace", { pathname, target, status });
+    router.replace(target);
+  }, [pathname, router, status]);
+
+  if (status !== "allowed") {
     return (
       <div className="flex h-full min-h-screen items-center justify-center text-gray-600">
-        Checking access...
+        {status === "loading" ? "Checking access..." : "Redirecting..."}
       </div>
     );
   }

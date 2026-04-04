@@ -17,6 +17,19 @@ export async function GET(request: Request) {
   }
 
   const query = isSuper ? {} : { _id: { $in: getAdminDepartmentIds(auth.user) } };
+  const searchParams = new URL(request.url).searchParams;
+  const requestedView = (searchParams.get("view") || "").trim().toLowerCase();
+  const isLightweightView = requestedView === "issues" || requestedView === "list";
+
+  if (isLightweightView) {
+    const selectFields = requestedView === "list" ? "_id name type createdAt" : "_id name type";
+    const departments = await Department.find(query)
+      .select(selectFields)
+      .sort({ name: 1 })
+      .lean();
+
+    return NextResponse.json({ departments });
+  }
 
   const departments = await Department.find(query).sort({ name: 1 });
 

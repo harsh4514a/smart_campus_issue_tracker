@@ -29,13 +29,13 @@ export async function GET(request: Request) {
     .select("name email role course institute department academicDepartment createdAt isDemoUser isActive")
     .populate("department", "name type")
     .populate("academicDepartment", "name type")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
   const normalizedStudents = students.map((student) => {
-    const plain = student.toObject();
     return {
-      ...plain,
-      department: plain.department || plain.academicDepartment || null,
+      ...student,
+      department: student.department || student.academicDepartment || null,
     };
   });
 
