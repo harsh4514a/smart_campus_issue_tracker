@@ -7,6 +7,9 @@ export const metadata = {
   title: "Smart Campus Issue Tracker",
   description: "Manage and track campus issues efficiently",
   keywords: ["campus", "issue tracker", "student portal","smart campus management system","campus management"],
+  verification: {
+    google: "B1PELzhtY0Cbz7bNRm_-hIxO_kJ6S9GHtNC3kWSQ7J4",
+  },
 };
 
 export default function RootLayout({

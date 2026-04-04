@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://smart-campus-issue-tracker.vercel.app/sitemap.xml
