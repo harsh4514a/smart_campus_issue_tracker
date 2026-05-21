@@ -53,22 +53,33 @@ This platform provides a **role-based, centralized solution** to track issues, a
 ## ⚙️ Tech Stack
 
 ### Frontend
-- React.js  
-- Next.js  
-- Tailwind CSS  
-- HTML  
-- CSS  
+- Next.js
+- React.js
+- TypeScript
+- Tailwind CSS
+- Lucide React
+- Recharts
 
 ### Backend
-- Node.js  
-- Express.js  
+- Node.js
+- Next.js API Routes
 
 ### Database
-- MongoDB  
+- MongoDB
+- Mongoose
+
+### Authentication & Security
+- JWT
+- bcryptjs
+- jose
+
+### Email Service
+- Nodemailer
 
 ### Tools
-- Git & GitHub  
-- Postman  
+- Git & GitHub
+- ESLint
+- npm
 
 ---
 
